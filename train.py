@@ -8,7 +8,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-import jiwer
 
 
 class VoxtralDataCollator:

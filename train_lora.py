@@ -8,7 +8,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-import jiwer
 from peft import LoraConfig, get_peft_model
 
 
