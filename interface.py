@@ -251,18 +251,54 @@ def start_voxtral_training(
             yield line
 
 
-PHRASES = [
-    "The quick brown fox jumps over the lazy dog.",
-    "Please say your full name.",
-    "Today is a good day to learn something new.",
-    "Artificial intelligence helps with many tasks.",
-    "I enjoy reading books and listening to music.",
-    "This is a sample sentence for testing speech.",
-    "Speak clearly and at a normal pace.",
-    "Numbers like one, two, three are easy to say.",
-    "The weather is sunny with a chance of rain.",
-    "Thank you for taking the time to help.",
-]
+def load_voxpopuli_phrases(language="en", max_phrases=None, split="train"):
+    """Load phrases from VoxPopuli dataset.
+
+    Args:
+        language: Language code (e.g., 'en', 'de', 'fr', etc.)
+        max_phrases: Maximum number of phrases to load (None for all available)
+        split: Dataset split to use ('train', 'validation', 'test')
+
+    Returns:
+        List of normalized text phrases
+    """
+    try:
+        from datasets import load_dataset
+        import random
+
+        # Load the specified language dataset
+        ds = load_dataset("facebook/voxpopuli", language, split=split)
+
+        # Extract normalized text phrases
+        phrases = []
+        for example in ds:
+            text = example.get("normalized_text", "").strip()
+            if text and len(text) > 10:  # Filter out very short phrases
+                phrases.append(text)
+
+        # Shuffle and limit if specified
+        if max_phrases:
+            phrases = random.sample(phrases, min(max_phrases, len(phrases)))
+        else:
+            # If no limit, shuffle the entire list
+            random.shuffle(phrases)
+
+        return phrases
+
+    except Exception as e:
+        print(f"Error loading VoxPopuli phrases: {e}")
+        # Fallback to some basic phrases if loading fails
+        return [
+            "The quick brown fox jumps over the lazy dog.",
+            "Please say your full name.",
+            "Today is a good day to learn something new.",
+            "Artificial intelligence helps with many tasks.",
+            "I enjoy reading books and listening to music.",
+        ]
+
+# Initialize phrases dynamically
+VOXPOPULI_LANGUAGE = "en"  # Default to English
+ALL_PHRASES = load_voxpopuli_phrases(VOXPOPULI_LANGUAGE, max_phrases=None)
 
 with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     has_gpu, gpu_msg = detect_nvidia_driver()
@@ -301,16 +337,87 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
     jsonl_out = gr.Textbox(label="Dataset JSONL path", interactive=False, visible=True)
 
+    # Language selection for VoxPopuli phrases
+    voxpopuli_lang = gr.Dropdown(
+        choices=["en", "de", "fr", "es", "pl", "it", "ro", "hu", "cs", "nl", "fi", "hr", "sk", "sl", "et", "lt"],
+        value="en",
+        label="VoxPopuli Language",
+        info="Select language for phrases from VoxPopuli dataset"
+    )
+
     # Recording grid with dynamic text readouts
-    phrase_texts_state = gr.State(PHRASES)
+    phrase_texts_state = gr.State(ALL_PHRASES)
+    visible_rows_state = gr.State(10)  # Start with 10 visible rows
+    max_rows = len(ALL_PHRASES)  # No cap on total rows
     phrase_markdowns: list[gr.Markdown] = []
     rec_components = []
+
+    def create_recording_grid(phrases, visible_count=10):
+        """Create recording grid components dynamically"""
+        markdowns = []
+        recordings = []
+        for idx, phrase in enumerate(phrases):
+            visible = idx < visible_count
+            md = gr.Markdown(f"**{idx+1}. {phrase}**", visible=visible)
+            markdowns.append(md)
+            comp = gr.Audio(sources="microphone", type="numpy", label=f"Recording {idx+1}", visible=visible)
+            recordings.append(comp)
+        return markdowns, recordings
+
+    # Initial grid creation
     with gr.Column():
-        for idx, phrase in enumerate(PHRASES):
-            md = gr.Markdown(f"**{idx+1}. {phrase}**")
-            phrase_markdowns.append(md)
-            comp = gr.Audio(sources="microphone", type="numpy", label=f"Recording {idx+1}")
-            rec_components.append(comp)
+        phrase_markdowns, rec_components = create_recording_grid(ALL_PHRASES, 10)
+
+    # Add more rows button
+    add_rows_btn = gr.Button("➕ Add 10 More Rows", variant="secondary")
+
+    def add_more_rows(current_visible, current_phrases):
+        """Add 10 more rows by making them visible"""
+        new_visible = min(current_visible + 10, len(current_phrases))
+        visibility_updates = []
+        for i in range(len(current_phrases)):
+            if i < new_visible:
+                visibility_updates.append(gr.update(visible=True))
+            else:
+                visibility_updates.append(gr.update(visible=False))
+        return [new_visible] + visibility_updates
+
+    def change_language(language):
+        """Change the language and reload phrases from VoxPopuli"""
+        new_phrases = load_voxpopuli_phrases(language, max_phrases=None)
+        # Reset visible rows to 10
+        visible_count = min(10, len(new_phrases))
+
+        # Create combined updates for existing components (up to current length)
+        current_len = len(phrase_markdowns)
+        combined_updates = []
+
+        # Update existing components
+        for i in range(current_len):
+            if i < len(new_phrases):
+                if i < visible_count:
+                    combined_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=True))
+                else:
+                    combined_updates.append(gr.update(visible=False))
+            else:
+                combined_updates.append(gr.update(visible=False))
+
+        # If we have more phrases than components, we can't update them via Gradio
+        # The interface will need to be reloaded for significantly different phrase counts
+        return [new_phrases, visible_count] + combined_updates
+
+    # Connect language change to phrase reloading
+    voxpopuli_lang.change(
+        change_language,
+        inputs=[voxpopuli_lang],
+        outputs=[phrase_texts_state, visible_rows_state] + phrase_markdowns + rec_components
+    )
+
+    add_rows_btn.click(
+        add_more_rows,
+        inputs=[visible_rows_state, phrase_texts_state],
+        outputs=[visible_rows_state] + phrase_markdowns + rec_components
+    )
 
     # Advanced options accordion
     with gr.Accordion("Advanced options", open=False):
@@ -366,7 +473,8 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             sr, data = rec
             out_path = wav_dir / f"rec_{i:04d}.wav"
             sf.write(str(out_path), data, sr)
-            label_text = (texts[i] if isinstance(texts, list) and i < len(texts) else (PHRASES[i] if i < len(PHRASES) else ""))
+            # Use the full phrase list (ALL_PHRASES) instead of just PHRASES
+            label_text = (texts[i] if isinstance(texts, list) and i < len(texts) else (ALL_PHRASES[i] if i < len(ALL_PHRASES) else ""))
             rows.append({"audio_path": str(out_path), "text": label_text})
         jsonl_path = dataset_dir / "data.jsonl"
         _write_jsonl(rows, jsonl_path)
@@ -409,11 +517,15 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             jsonl_path = dataset_dir / "data.jsonl"
             _write_jsonl(rows, jsonl_path)
             # Build markdown content updates for on-screen prompts
-            md_updates = []
+            combined_updates = []
             for i in range(len(phrase_markdowns)):
                 t = texts[i] if i < len(texts) else ""
-                md_updates.append(f"**{i+1}. {t}**")
-            return (str(jsonl_path), texts, *md_updates)
+                if i < len(texts):
+                    combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                else:
+                    combined_updates.append(gr.update(visible=False))
+
+            return (str(jsonl_path), texts, *combined_updates)
 
         vp_btn.click(
             _collect_voxpopuli,
@@ -439,6 +551,6 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 if __name__ == "__main__":
     server_port = int(os.environ.get("INTERFACE_PORT", "7860"))
     server_name = os.environ.get("INTERFACE_HOST", "0.0.0.0")
-    demo.queue().launch(server_name=server_name, server_port=server_port, mcp_server=True)
+    demo.queue().launch(server_name=server_name, server_port=server_port, mcp_server=True, ssr_mode=False)
 
 

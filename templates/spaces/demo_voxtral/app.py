@@ -30,6 +30,6 @@ with gr.Blocks() as demo:
     btn.click(transcribe, inputs=[audio], outputs=[out])
 
 if __name__ == "__main__":
-    demo.launch(mcp_server=True)
+    demo.launch(mcp_server=True, ssr_mode=False)
 
 
