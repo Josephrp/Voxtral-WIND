@@ -254,9 +254,9 @@ def start_voxtral_training(
 def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
     """Load phrases from various multilingual speech datasets.
 
-    Tries multiple datasets in order of preference:
-    1. Common Voice (most reliable and up-to-date)
-    2. FLEURS (Google's multilingual dataset)
+    Uses datasets that work with current library versions:
+    1. ML Commons Speech (modern format)
+    2. Multilingual LibriSpeech (modern format)
     3. Fallback to basic phrases
 
     Args:
@@ -272,70 +272,97 @@ def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
 
     # Language code mapping for different datasets
     lang_mappings = {
-        "en": {"common_voice": "en", "fleurs": "en_us"},
-        "de": {"common_voice": "de", "fleurs": "de_de"},
-        "fr": {"common_voice": "fr", "fleurs": "fr_fr"},
-        "es": {"common_voice": "es", "fleurs": "es_419"},
-        "it": {"common_voice": "it", "fleurs": "it_it"},
-        "pt": {"common_voice": "pt", "fleurs": "pt_br"},
-        "pl": {"common_voice": "pl", "fleurs": "pl_pl"},
-        "nl": {"common_voice": "nl", "fleurs": "nl_nl"},
-        "ru": {"common_voice": "ru", "fleurs": "ru_ru"},
-        "ar": {"common_voice": "ar", "fleurs": "ar_eg"},
-        "zh": {"common_voice": "zh-CN", "fleurs": "zh_cn"},
-        "ja": {"common_voice": "ja", "fleurs": "ja_jp"},
-        "ko": {"common_voice": "ko", "fleurs": "ko_kr"},
+        "en": {"ml_speech": "en", "librispeech": "clean"},
+        "de": {"ml_speech": "de", "librispeech": None},
+        "fr": {"ml_speech": "fr", "librispeech": None},
+        "es": {"ml_speech": "es", "librispeech": None},
+        "it": {"ml_speech": "it", "librispeech": None},
+        "pt": {"ml_speech": "pt", "librispeech": None},
+        "pl": {"ml_speech": "pl", "librispeech": None},
+        "nl": {"ml_speech": "nl", "librispeech": None},
+        "ru": {"ml_speech": "ru", "librispeech": None},
+        "ar": {"ml_speech": "ar", "librispeech": None},
+        "zh": {"ml_speech": "zh", "librispeech": None},
+        "ja": {"ml_speech": "ja", "librispeech": None},
+        "ko": {"ml_speech": "ko", "librispeech": None},
     }
 
-    lang_config = lang_mappings.get(language, {"common_voice": language, "fleurs": f"{language}_{language}"})
+    lang_config = lang_mappings.get(language, {"ml_speech": language, "librispeech": None})
 
-    # Try Common Voice first (most reliable)
+    # Try ML Commons Speech first (modern format)
     try:
-        print(f"Trying Common Voice dataset for language: {language}")
-        cv_lang = lang_config["common_voice"]
-        ds = load_dataset("mozilla-foundation/common_voice_11_0", cv_lang, split=split, streaming=True)
+        print(f"Trying ML Commons Speech dataset for language: {language}")
+        ml_lang = lang_config["ml_speech"]
+        ds = load_dataset("mlcommons/ml_spoken_words", f"speech_commands_{ml_lang}", split=split, streaming=True)
+
+        phrases = []
+        count = 0
+        seen_words = set()
+
+        for example in ds:
+            if max_phrases and count >= max_phrases:
+                break
+            word = example.get("word", "").strip()
+            if word and len(word) > 2 and word not in seen_words:  # Filter duplicates and short words
+                phrases.append(word)
+                seen_words.add(word)
+                count += 1
+
+        if phrases:
+            print(f"Successfully loaded {len(phrases)} phrases from ML Commons Speech")
+            random.shuffle(phrases)
+            return phrases
+
+    except Exception as e:
+        print(f"ML Commons Speech failed: {e}")
+
+    # Try Multilingual LibriSpeech as backup
+    try:
+        if lang_config["librispeech"]:
+            print(f"Trying Multilingual LibriSpeech dataset for language: {language}")
+            librispeech_lang = lang_config["librispeech"]
+            ds = load_dataset("facebook/multilingual_librispeech", f"{language}", split=split, streaming=True)
+
+            phrases = []
+            count = 0
+            for example in ds:
+                if max_phrases and count >= max_phrases:
+                    break
+                text = example.get("text", "").strip()
+                if text and len(text) > 10:  # Filter out very short phrases
+                    phrases.append(text)
+                    count += 1
+
+            if phrases:
+                print(f"Successfully loaded {len(phrases)} phrases from Multilingual LibriSpeech")
+                random.shuffle(phrases)
+                return phrases
+
+    except Exception as e:
+        print(f"Multilingual LibriSpeech failed: {e}")
+
+    # Try TED Talk translations (works for many languages)
+    try:
+        print(f"Trying TED Talk translations for language: {language}")
+        ds = load_dataset("ted_talks_iwslt", language=[f"{language}_en"], split=split, streaming=True)
 
         phrases = []
         count = 0
         for example in ds:
             if max_phrases and count >= max_phrases:
                 break
-            text = example.get("sentence", "").strip()
+            text = example.get("translation", {}).get(language, "").strip()
             if text and len(text) > 10:  # Filter out very short phrases
                 phrases.append(text)
                 count += 1
 
         if phrases:
-            print(f"Successfully loaded {len(phrases)} phrases from Common Voice")
+            print(f"Successfully loaded {len(phrases)} phrases from TED Talks")
             random.shuffle(phrases)
             return phrases
 
     except Exception as e:
-        print(f"Common Voice failed: {e}")
-
-    # Try FLEURS as backup
-    try:
-        print(f"Trying FLEURS dataset for language: {language}")
-        fleurs_lang = lang_config["fleurs"]
-        ds = load_dataset("google/fleurs", fleurs_lang, split=split, streaming=True)
-
-        phrases = []
-        count = 0
-        for example in ds:
-            if max_phrases and count >= max_phrases:
-                break
-            text = example.get("transcription", "").strip()
-            if text and len(text) > 10:  # Filter out very short phrases
-                phrases.append(text)
-                count += 1
-
-        if phrases:
-            print(f"Successfully loaded {len(phrases)} phrases from FLEURS")
-            random.shuffle(phrases)
-            return phrases
-
-    except Exception as e:
-        print(f"FLEURS failed: {e}")
+        print(f"TED Talks failed: {e}")
 
     # Final fallback to basic phrases
     print("All dataset loading attempts failed, using fallback phrases")
@@ -434,17 +461,20 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     # Recording grid with dynamic text readouts
     phrase_texts_state = gr.State(ALL_PHRASES)
     visible_rows_state = gr.State(10)  # Start with 10 visible rows
-    max_rows = len(ALL_PHRASES)  # No cap on total rows
+    MAX_COMPONENTS = 100  # Fixed maximum number of components
+
+    # Create fixed number of components upfront
     phrase_markdowns: list[gr.Markdown] = []
     rec_components = []
 
-    def create_recording_grid(phrases, visible_count=10):
-        """Create recording grid components dynamically"""
+    def create_recording_grid(max_components=MAX_COMPONENTS):
+        """Create recording grid components with fixed maximum"""
         markdowns = []
         recordings = []
-        for idx, phrase in enumerate(phrases):
-            visible = idx < visible_count
-            md = gr.Markdown(f"**{idx+1}. {phrase}**", visible=visible)
+        for idx in range(max_components):
+            visible = idx < 10  # Only first 10 visible initially
+            phrase_text = ALL_PHRASES[idx] if idx < len(ALL_PHRASES) else ""
+            md = gr.Markdown(f"**{idx+1}. {phrase_text}**", visible=visible)
             markdowns.append(md)
             comp = gr.Audio(sources="microphone", type="numpy", label=f"Recording {idx+1}", visible=visible)
             recordings.append(comp)
@@ -452,44 +482,41 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
     # Initial grid creation
     with gr.Column():
-        phrase_markdowns, rec_components = create_recording_grid(ALL_PHRASES, 10)
+        phrase_markdowns, rec_components = create_recording_grid(MAX_COMPONENTS)
 
     # Add more rows button
     add_rows_btn = gr.Button("➕ Add 10 More Rows", variant="secondary")
 
     def add_more_rows(current_visible, current_phrases):
         """Add 10 more rows by making them visible"""
-        new_visible = min(current_visible + 10, len(current_phrases))
+        new_visible = min(current_visible + 10, MAX_COMPONENTS, len(current_phrases))
+
+        # Create updates for all MAX_COMPONENTS
         visibility_updates = []
-        for i in range(len(current_phrases)):
-            if i < new_visible:
+        for i in range(MAX_COMPONENTS):
+            if i < len(current_phrases) and i < new_visible:
                 visibility_updates.append(gr.update(visible=True))
             else:
                 visibility_updates.append(gr.update(visible=False))
+
         return [new_visible] + visibility_updates
 
     def change_language(language):
         """Change the language and reload phrases from multilingual datasets"""
         new_phrases = load_multilingual_phrases(language, max_phrases=None)
         # Reset visible rows to 10
-        visible_count = min(10, len(new_phrases))
+        visible_count = min(10, len(new_phrases), MAX_COMPONENTS)
 
-        # Create combined updates for existing components (up to current length)
-        current_len = len(phrase_markdowns)
+        # Create updates for all MAX_COMPONENTS
         combined_updates = []
-
-        # Update existing components
-        for i in range(current_len):
-            if i < len(new_phrases):
-                if i < visible_count:
-                    combined_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=True))
-                else:
-                    combined_updates.append(gr.update(visible=False))
+        for i in range(MAX_COMPONENTS):
+            if i < len(new_phrases) and i < visible_count:
+                combined_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=True))
+            elif i < len(new_phrases):
+                combined_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=False))
             else:
-                combined_updates.append(gr.update(visible=False))
+                combined_updates.append(gr.update(value=f"**{i+1}. **", visible=False))
 
-        # If we have more phrases than components, we can't update them via Gradio
-        # The interface will need to be reloaded for significantly different phrase counts
         return [new_phrases, visible_count] + combined_updates
 
     # Connect language change to phrase reloading
@@ -503,6 +530,56 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         add_more_rows,
         inputs=[visible_rows_state, phrase_texts_state],
         outputs=[visible_rows_state] + phrase_markdowns + rec_components
+    )
+
+    # Recording dataset creation button
+    record_dataset_btn = gr.Button("🎙️ Create Dataset from Recordings", variant="primary")
+
+    def create_recording_dataset(*recordings_and_state):
+        """Create dataset from visible recordings and phrases"""
+        try:
+            import soundfile as sf
+
+            # Extract recordings and state
+            recordings = recordings_and_state[:-1]  # All except the last item (phrases)
+            phrases = recordings_and_state[-1]      # Last item is phrases
+
+            dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
+            wav_dir = dataset_dir / "wavs"
+            wav_dir.mkdir(parents=True, exist_ok=True)
+
+            rows = []
+            successful_recordings = 0
+
+            # Process each recording
+            for i, rec in enumerate(recordings):
+                if rec is not None and i < len(phrases):
+                    try:
+                        sr, data = rec
+                        out_path = wav_dir / f"recording_{i:04d}.wav"
+                        sf.write(str(out_path), data, sr)
+                        rows.append({"audio_path": str(out_path), "text": phrases[i]})
+                        successful_recordings += 1
+                    except Exception as e:
+                        print(f"Error processing recording {i}: {e}")
+
+            if rows:
+                jsonl_path = dataset_dir / "recorded_data.jsonl"
+                _write_jsonl(rows, jsonl_path)
+                return f"✅ Dataset created successfully! {successful_recordings} recordings saved to {jsonl_path}"
+            else:
+                return "❌ No recordings found. Please record some audio first."
+
+        except Exception as e:
+            return f"❌ Error creating dataset: {str(e)}"
+
+    # Status display for dataset creation
+    dataset_status = gr.Textbox(label="Dataset Creation Status", interactive=False, visible=True)
+
+    record_dataset_btn.click(
+        create_recording_dataset,
+        inputs=rec_components + [phrase_texts_state],
+        outputs=[dataset_status]
     )
 
     # Advanced options accordion
@@ -576,22 +653,66 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         vp_btn = gr.Button("Use Multilingual Dataset Sample")
 
         def _collect_multilingual_sample(lang_code: str, num_samples: int, split: str):
-            """Load sample from multilingual datasets (Common Voice preferred)"""
+            """Load sample from multilingual datasets (ML Commons preferred)"""
             from datasets import load_dataset, Audio
             import random
 
-            # Language code mapping for Common Voice
-            cv_lang_map = {
+            # Language code mapping for ML Commons Speech
+            ml_lang_map = {
                 "en": "en", "de": "de", "fr": "fr", "es": "es", "it": "it",
                 "pl": "pl", "pt": "pt", "nl": "nl", "ru": "ru", "ar": "ar",
-                "zh": "zh-CN", "ja": "ja", "ko": "ko"
+                "zh": "zh", "ja": "ja", "ko": "ko"
             }
 
-            cv_lang = cv_lang_map.get(lang_code, lang_code)
+            ml_lang = ml_lang_map.get(lang_code, lang_code)
 
             try:
-                # Try Common Voice first
-                ds = load_dataset("mozilla-foundation/common_voice_11_0", cv_lang, split=split, streaming=True)
+                # Try ML Commons Speech first
+                ds = load_dataset("mlcommons/ml_spoken_words", f"speech_commands_{ml_lang}", split=split, streaming=True)
+                ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+
+                dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
+                rows: list[dict] = []
+                texts: list[str] = []
+
+                count = 0
+                seen_words = set()
+
+                for ex in ds:
+                    if count >= num_samples:
+                        break
+
+                    audio = ex.get("audio") or {}
+                    path = audio.get("path")
+                    word = ex.get("word", "").strip()
+
+                    if path and word and len(word) > 2 and word not in seen_words:
+                        rows.append({"audio_path": path, "text": word})
+                        texts.append(str(word))
+                        seen_words.add(word)
+                        count += 1
+
+                if rows:
+                    jsonl_path = dataset_dir / "data.jsonl"
+                    _write_jsonl(rows, jsonl_path)
+
+                    # Build markdown content updates for on-screen prompts
+                    combined_updates = []
+                    for i in range(MAX_COMPONENTS):
+                        t = texts[i] if i < len(texts) else ""
+                        if i < len(texts):
+                            combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                        else:
+                            combined_updates.append(gr.update(visible=False))
+
+                    return (str(jsonl_path), texts, *combined_updates)
+
+            except Exception as e:
+                print(f"ML Commons Speech sample loading failed: {e}")
+
+            # Try Multilingual LibriSpeech as backup
+            try:
+                ds = load_dataset("facebook/multilingual_librispeech", f"{lang_code}", split=split, streaming=True)
                 ds = ds.cast_column("audio", Audio(sampling_rate=16000))
 
                 dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
@@ -605,7 +726,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
                     audio = ex.get("audio") or {}
                     path = audio.get("path")
-                    text = ex.get("sentence", "").strip()
+                    text = ex.get("text", "").strip()
 
                     if path and text and len(text) > 10:
                         rows.append({"audio_path": path, "text": text})
@@ -618,7 +739,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
                     # Build markdown content updates for on-screen prompts
                     combined_updates = []
-                    for i in range(len(phrase_markdowns)):
+                    for i in range(MAX_COMPONENTS):
                         t = texts[i] if i < len(texts) else ""
                         if i < len(texts):
                             combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
@@ -628,7 +749,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
                     return (str(jsonl_path), texts, *combined_updates)
 
             except Exception as e:
-                print(f"Common Voice sample loading failed: {e}")
+                print(f"Multilingual LibriSpeech failed: {e}")
 
             # Fallback: generate synthetic samples with text only
             print("Using fallback: generating text-only samples")
@@ -642,7 +763,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
             # Build markdown content updates for on-screen prompts
             combined_updates = []
-            for i in range(len(phrase_markdowns)):
+            for i in range(MAX_COMPONENTS):
                 t = texts[i] if i < len(texts) else ""
                 if i < len(texts):
                     combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
