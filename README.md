@@ -1,3 +1,15 @@
+---
+title: VoxFactory
+emoji: 📚
+colorFrom: gray
+colorTo: red
+sdk: gradio
+app_file: interface.py
+pinned: false
+license: mit
+short_description: FinetuneASR Voxtral
+---
+
 # Finetune Voxtral for ASR with Transformers 🤗
 
 This repository fine-tunes the [Voxtral](https://huggingface.co/Deep-unlearning/Voxtral) speech model on conversational speech datasets using the Hugging Face `transformers` and `datasets` libraries.
