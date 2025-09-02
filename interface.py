@@ -252,159 +252,115 @@ def start_voxtral_training(
 
 
 def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
-    """Load phrases from various multilingual speech datasets.
+    """Load phrases from NVIDIA Granary dataset.
 
-    Uses datasets that work with current library versions:
-    1. ML Commons Speech (modern format)
-    2. Multilingual LibriSpeech (modern format)
-    3. Fallback to basic phrases
+    Uses the high-quality Granary dataset which contains speech recognition
+    and translation data for 25 European languages.
 
     Args:
         language: Language code (e.g., 'en', 'de', 'fr', etc.)
-        max_phrases: Maximum number of phrases to load (None for all available)
+        max_phrases: Maximum number of phrases to load (None for default 1000)
         split: Dataset split to use ('train', 'validation', 'test')
 
     Returns:
-        List of normalized text phrases
+        List of transcription phrases from Granary dataset
     """
     from datasets import load_dataset
     import random
 
-    # Language code mapping for different datasets
-    lang_mappings = {
-        "en": {"ml_speech": "en", "librispeech": "clean"},
-        "de": {"ml_speech": "de", "librispeech": None},
-        "fr": {"ml_speech": "fr", "librispeech": None},
-        "es": {"ml_speech": "es", "librispeech": None},
-        "it": {"ml_speech": "it", "librispeech": None},
-        "pt": {"ml_speech": "pt", "librispeech": None},
-        "pl": {"ml_speech": "pl", "librispeech": None},
-        "nl": {"ml_speech": "nl", "librispeech": None},
-        "ru": {"ml_speech": "ru", "librispeech": None},
-        "ar": {"ml_speech": "ar", "librispeech": None},
-        "zh": {"ml_speech": "zh", "librispeech": None},
-        "ja": {"ml_speech": "ja", "librispeech": None},
-        "ko": {"ml_speech": "ko", "librispeech": None},
+    # Default to 1000 phrases if not specified
+    if max_phrases is None:
+        max_phrases = 1000
+
+    # Language code mapping for Granary dataset
+    # Granary supports these language codes directly
+    granary_supported_langs = {
+        "en": "en", "de": "de", "fr": "fr", "es": "es", "it": "it",
+        "pl": "pl", "pt": "pt", "nl": "nl", "ru": "ru", "ar": "ar",
+        "zh": "zh", "ja": "ja", "ko": "ko", "da": "da", "sv": "sv",
+        "no": "no", "fi": "fi", "et": "et", "lv": "lv", "lt": "lt",
+        "sl": "sl", "sk": "sk", "cs": "cs", "hr": "hr", "bg": "bg",
+        "uk": "uk", "ro": "ro", "hu": "hu", "el": "el", "mt": "mt"
     }
 
-    lang_config = lang_mappings.get(language, {"ml_speech": language, "librispeech": None})
+    # Map input language to Granary configuration
+    granary_lang = granary_supported_langs.get(language, "en")  # Default to English
 
-    # Try ML Commons Speech first (modern format)
     try:
-        print(f"Trying ML Commons Speech dataset for language: {language}")
-        ml_lang = lang_config["ml_speech"]
-        ds = load_dataset("mlcommons/ml_spoken_words", f"speech_commands_{ml_lang}", split=split, streaming=True)
+        print(f"Loading phrases from NVIDIA Granary dataset for language: {language}")
+
+        # Load Granary dataset with ASR (speech recognition) split
+        # Use streaming to handle large datasets efficiently
+        ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True)
 
         phrases = []
         count = 0
-        seen_words = set()
+        seen_phrases = set()
 
+        # Sample phrases from the dataset
         for example in ds:
-            if max_phrases and count >= max_phrases:
+            if count >= max_phrases:
                 break
-            word = example.get("word", "").strip()
-            if word and len(word) > 2 and word not in seen_words:  # Filter duplicates and short words
-                phrases.append(word)
-                seen_words.add(word)
-                count += 1
 
-        if phrases:
-            print(f"Successfully loaded {len(phrases)} phrases from ML Commons Speech")
-            random.shuffle(phrases)
-            return phrases
+            # Extract the text transcription
+            text = example.get("text", "").strip()
 
-    except Exception as e:
-        print(f"ML Commons Speech failed: {e}")
+            # Filter for quality phrases
+            if (text and
+                len(text) > 10 and  # Minimum length
+                len(text) < 200 and  # Maximum length to avoid very long utterances
+                text not in seen_phrases and  # Avoid duplicates
+                not text.isdigit() and  # Avoid pure numbers
+                not all(c in "0123456789., " for c in text)):  # Avoid mostly numeric
 
-    # Try Multilingual LibriSpeech as backup
-    try:
-        if lang_config["librispeech"]:
-            print(f"Trying Multilingual LibriSpeech dataset for language: {language}")
-            librispeech_lang = lang_config["librispeech"]
-            ds = load_dataset("facebook/multilingual_librispeech", f"{language}", split=split, streaming=True)
-
-            phrases = []
-            count = 0
-            for example in ds:
-                if max_phrases and count >= max_phrases:
-                    break
-                text = example.get("text", "").strip()
-                if text and len(text) > 10:  # Filter out very short phrases
-                    phrases.append(text)
-                    count += 1
-
-            if phrases:
-                print(f"Successfully loaded {len(phrases)} phrases from Multilingual LibriSpeech")
-                random.shuffle(phrases)
-                return phrases
-
-    except Exception as e:
-        print(f"Multilingual LibriSpeech failed: {e}")
-
-    # Try TED Talk translations (works for many languages)
-    try:
-        print(f"Trying TED Talk translations for language: {language}")
-        ds = load_dataset("ted_talks_iwslt", language=[f"{language}_en"], split=split, streaming=True)
-
-        phrases = []
-        count = 0
-        for example in ds:
-            if max_phrases and count >= max_phrases:
-                break
-            text = example.get("translation", {}).get(language, "").strip()
-            if text and len(text) > 10:  # Filter out very short phrases
                 phrases.append(text)
+                seen_phrases.add(text)
                 count += 1
 
         if phrases:
-            print(f"Successfully loaded {len(phrases)} phrases from TED Talks")
+            # Shuffle the phrases for variety
             random.shuffle(phrases)
+            print(f"Successfully loaded {len(phrases)} phrases from Granary dataset for {language}")
             return phrases
 
+        else:
+            print(f"No suitable phrases found in Granary dataset for {language}")
+            raise Exception("No phrases found")
+
     except Exception as e:
-        print(f"TED Talks failed: {e}")
+        print(f"Granary dataset loading failed for {language}: {e}")
 
-    # Final fallback to basic phrases
-    print("All dataset loading attempts failed, using fallback phrases")
-    fallback_phrases = [
-        "The quick brown fox jumps over the lazy dog.",
-        "Please say your full name.",
-        "Today is a good day to learn something new.",
-        "Artificial intelligence helps with many tasks.",
-        "I enjoy reading books and listening to music.",
-        "This is a sample sentence for testing speech.",
-        "Speak clearly and at a normal pace.",
-        "Numbers like one, two, three are easy to say.",
-        "The weather is sunny with a chance of rain.",
-        "Thank you for taking the time to help.",
-        "Hello, how are you today?",
-        "I would like to order a pizza.",
-        "The meeting is scheduled for tomorrow.",
-        "Please call me back as soon as possible.",
-        "Thank you for your assistance.",
-        "Can you help me with this problem?",
-        "I need to make a reservation.",
-        "The weather looks beautiful outside.",
-        "Let's go for a walk in the park.",
-        "I enjoy listening to classical music.",
-        "What time does the store open?",
-        "I forgot my password again.",
-        "Please send me the invoice.",
-        "The project is almost complete.",
-        "I appreciate your hard work.",
-        "Let's schedule a meeting next week.",
-        "The food tastes delicious.",
-        "I need to buy some groceries.",
-        "Please turn off the lights.",
-        "The presentation went very well.",
-    ]
+        # Fallback to basic phrases if Granary fails
+        print("Using fallback phrases")
+        fallback_phrases = [
+            "The quick brown fox jumps over the lazy dog.",
+            "Please say your full name.",
+            "Today is a good day to learn something new.",
+            "Artificial intelligence helps with many tasks.",
+            "I enjoy reading books and listening to music.",
+            "This is a sample sentence for testing speech.",
+            "Speak clearly and at a normal pace.",
+            "Numbers like one, two, three are easy to say.",
+            "The weather is sunny with a chance of rain.",
+            "Thank you for taking the time to help.",
+            "Hello, how are you today?",
+            "I would like to order a pizza.",
+            "The meeting is scheduled for tomorrow.",
+            "Please call me back as soon as possible.",
+            "Thank you for your assistance.",
+            "Can you help me with this problem?",
+            "I need to make a reservation.",
+            "The weather looks beautiful outside.",
+            "Let's go for a walk in the park.",
+            "I enjoy listening to classical music.",
+        ]
 
-    if max_phrases:
-        fallback_phrases = random.sample(fallback_phrases, min(max_phrases, len(fallback_phrases)))
-    else:
-        random.shuffle(fallback_phrases)
+        if max_phrases:
+            fallback_phrases = random.sample(fallback_phrases, min(max_phrases, len(fallback_phrases)))
+        else:
+            random.shuffle(fallback_phrases)
 
-    return fallback_phrases
+        return fallback_phrases
 
 # Initialize phrases dynamically
 DEFAULT_LANGUAGE = "en"  # Default to English
@@ -447,15 +403,43 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
     jsonl_out = gr.Textbox(label="Dataset JSONL path", interactive=False, visible=True)
 
-    # Language selection for multilingual phrases
+    # Language selection for NVIDIA Granary phrases
     language_selector = gr.Dropdown(
         choices=[
-            "en", "de", "fr", "es", "it", "pt", "pl", "nl", "ru",
-            "ar", "zh", "ja", "ko", "tr", "ca", "sv", "fi", "da"
+            ("English", "en"),
+            ("German", "de"),
+            ("French", "fr"),
+            ("Spanish", "es"),
+            ("Italian", "it"),
+            ("Portuguese", "pt"),
+            ("Polish", "pl"),
+            ("Dutch", "nl"),
+            ("Russian", "ru"),
+            ("Arabic", "ar"),
+            ("Chinese", "zh"),
+            ("Japanese", "ja"),
+            ("Korean", "ko"),
+            ("Danish", "da"),
+            ("Swedish", "sv"),
+            ("Norwegian", "no"),
+            ("Finnish", "fi"),
+            ("Estonian", "et"),
+            ("Latvian", "lv"),
+            ("Lithuanian", "lt"),
+            ("Slovenian", "sl"),
+            ("Slovak", "sk"),
+            ("Czech", "cs"),
+            ("Croatian", "hr"),
+            ("Bulgarian", "bg"),
+            ("Ukrainian", "uk"),
+            ("Romanian", "ro"),
+            ("Hungarian", "hu"),
+            ("Greek", "el"),
+            ("Maltese", "mt")
         ],
         value="en",
         label="Language for Speech Phrases",
-        info="Select language for phrases from Common Voice, FLEURS, or fallback datasets"
+        info="Select language for authentic phrases from NVIDIA Granary dataset (25 European languages)"
     )
 
     # Recording grid with dynamic text readouts
@@ -491,15 +475,20 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         """Add 10 more rows by making them visible"""
         new_visible = min(current_visible + 10, MAX_COMPONENTS, len(current_phrases))
 
-        # Create updates for all MAX_COMPONENTS
-        visibility_updates = []
+        # Create updates for all MAX_COMPONENTS (both markdown and audio components)
+        markdown_updates = []
+        audio_updates = []
+
         for i in range(MAX_COMPONENTS):
             if i < len(current_phrases) and i < new_visible:
-                visibility_updates.append(gr.update(visible=True))
+                markdown_updates.append(gr.update(visible=True))
+                audio_updates.append(gr.update(visible=True))
             else:
-                visibility_updates.append(gr.update(visible=False))
+                markdown_updates.append(gr.update(visible=False))
+                audio_updates.append(gr.update(visible=False))
 
-        return [new_visible] + visibility_updates
+        # Return: [state] + markdown_updates + audio_updates
+        return [new_visible] + markdown_updates + audio_updates
 
     def change_language(language):
         """Change the language and reload phrases from multilingual datasets"""
@@ -507,17 +496,23 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         # Reset visible rows to 10
         visible_count = min(10, len(new_phrases), MAX_COMPONENTS)
 
-        # Create updates for all MAX_COMPONENTS
-        combined_updates = []
+        # Create separate updates for markdown and audio components
+        markdown_updates = []
+        audio_updates = []
+
         for i in range(MAX_COMPONENTS):
             if i < len(new_phrases) and i < visible_count:
-                combined_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=True))
+                markdown_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=True))
+                audio_updates.append(gr.update(visible=True))
             elif i < len(new_phrases):
-                combined_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=False))
+                markdown_updates.append(gr.update(value=f"**{i+1}. {new_phrases[i]}**", visible=False))
+                audio_updates.append(gr.update(visible=False))
             else:
-                combined_updates.append(gr.update(value=f"**{i+1}. **", visible=False))
+                markdown_updates.append(gr.update(value=f"**{i+1}. **", visible=False))
+                audio_updates.append(gr.update(visible=False))
 
-        return [new_phrases, visible_count] + combined_updates
+        # Return: [phrases_state, visible_state] + markdown_updates + audio_updates
+        return [new_phrases, visible_count] + markdown_updates + audio_updates
 
     # Connect language change to phrase reloading
     language_selector.change(
@@ -647,112 +642,87 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
     # Quick sample from multilingual datasets (Common Voice, etc.)
     with gr.Row():
-        vp_lang = gr.Dropdown(choices=["en", "de", "fr", "es", "it", "pl", "pt", "nl", "ru", "ar", "zh", "ja", "ko"], value="en", label="Sample Language")
+        vp_lang = gr.Dropdown(choices=["en", "de", "fr", "es", "it", "pl", "pt", "nl", "ru", "ar", "zh", "ja", "ko", "da", "sv", "fi", "et", "cs", "hr", "bg", "uk", "ro", "hu", "el"], value="en", label="Sample Language")
         vp_samples = gr.Number(value=20, precision=0, label="Num samples")
         vp_split = gr.Dropdown(choices=["train", "validation", "test"], value="train", label="Split")
         vp_btn = gr.Button("Use Multilingual Dataset Sample")
 
         def _collect_multilingual_sample(lang_code: str, num_samples: int, split: str):
-            """Load sample from multilingual datasets (ML Commons preferred)"""
+            """Collect sample audio and text from NVIDIA Granary dataset"""
             from datasets import load_dataset, Audio
             import random
 
-            # Language code mapping for ML Commons Speech
-            ml_lang_map = {
+            # Map language code to Granary format
+            granary_lang_map = {
                 "en": "en", "de": "de", "fr": "fr", "es": "es", "it": "it",
                 "pl": "pl", "pt": "pt", "nl": "nl", "ru": "ru", "ar": "ar",
-                "zh": "zh", "ja": "ja", "ko": "ko"
+                "zh": "zh", "ja": "ja", "ko": "ko", "da": "da", "sv": "sv",
+                "no": "no", "fi": "fi", "et": "et", "lv": "lv", "lt": "lt",
+                "sl": "sl", "sk": "sk", "cs": "cs", "hr": "hr", "bg": "bg",
+                "uk": "uk", "ro": "ro", "hu": "hu", "el": "el", "mt": "mt"
             }
 
-            ml_lang = ml_lang_map.get(lang_code, lang_code)
+            granary_lang = granary_lang_map.get(lang_code, "en")
 
             try:
-                # Try ML Commons Speech first
-                ds = load_dataset("mlcommons/ml_spoken_words", f"speech_commands_{ml_lang}", split=split, streaming=True)
-                ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+                print(f"Collecting {num_samples} samples from NVIDIA Granary dataset for language: {lang_code}")
+
+                # Load Granary dataset with ASR split
+                ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True)
 
                 dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
-                rows: list[dict] = []
-                texts: list[str] = []
-
+                rows = []
+                texts = []
                 count = 0
-                seen_words = set()
 
-                for ex in ds:
+                # Sample from the dataset
+                for example in ds:
                     if count >= num_samples:
                         break
 
-                    audio = ex.get("audio") or {}
-                    path = audio.get("path")
-                    word = ex.get("word", "").strip()
+                    text = example.get("text", "").strip()
+                    audio_path = example.get("audio_filepath", "")
 
-                    if path and word and len(word) > 2 and word not in seen_words:
-                        rows.append({"audio_path": path, "text": word})
-                        texts.append(str(word))
-                        seen_words.add(word)
+                    # Filter for quality samples
+                    if (text and
+                        len(text) > 10 and
+                        len(text) < 200 and
+                        audio_path):  # Must have audio file
+
+                        rows.append({
+                            "audio_path": audio_path,
+                            "text": text
+                        })
+                        texts.append(text)
                         count += 1
 
                 if rows:
                     jsonl_path = dataset_dir / "data.jsonl"
                     _write_jsonl(rows, jsonl_path)
 
-                    # Build markdown content updates for on-screen prompts
-                    combined_updates = []
+                    print(f"Successfully collected {len(rows)} samples from Granary dataset")
+
+                    # Build markdown and audio content updates for on-screen prompts
+                    markdown_updates = []
+                    audio_updates = []
                     for i in range(MAX_COMPONENTS):
                         t = texts[i] if i < len(texts) else ""
                         if i < len(texts):
-                            combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                            markdown_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                            audio_updates.append(gr.update(visible=True))
                         else:
-                            combined_updates.append(gr.update(visible=False))
+                            markdown_updates.append(gr.update(visible=False))
+                            audio_updates.append(gr.update(visible=False))
+
+                    combined_updates = markdown_updates + audio_updates
 
                     return (str(jsonl_path), texts, *combined_updates)
 
             except Exception as e:
-                print(f"ML Commons Speech sample loading failed: {e}")
+                print(f"Granary sample collection failed for {lang_code}: {e}")
 
-            # Try Multilingual LibriSpeech as backup
-            try:
-                ds = load_dataset("facebook/multilingual_librispeech", f"{lang_code}", split=split, streaming=True)
-                ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-
-                dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
-                rows: list[dict] = []
-                texts: list[str] = []
-
-                count = 0
-                for ex in ds:
-                    if count >= num_samples:
-                        break
-
-                    audio = ex.get("audio") or {}
-                    path = audio.get("path")
-                    text = ex.get("text", "").strip()
-
-                    if path and text and len(text) > 10:
-                        rows.append({"audio_path": path, "text": text})
-                        texts.append(str(text))
-                        count += 1
-
-                if rows:
-                    jsonl_path = dataset_dir / "data.jsonl"
-                    _write_jsonl(rows, jsonl_path)
-
-                    # Build markdown content updates for on-screen prompts
-                    combined_updates = []
-                    for i in range(MAX_COMPONENTS):
-                        t = texts[i] if i < len(texts) else ""
-                        if i < len(texts):
-                            combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
-                        else:
-                            combined_updates.append(gr.update(visible=False))
-
-                    return (str(jsonl_path), texts, *combined_updates)
-
-            except Exception as e:
-                print(f"Multilingual LibriSpeech failed: {e}")
-
-            # Fallback: generate synthetic samples with text only
-            print("Using fallback: generating text-only samples")
+            # Fallback: generate text-only samples if Granary fails
+            print(f"Using fallback: generating text-only samples for {lang_code}")
             phrases = load_multilingual_phrases(lang_code, max_phrases=num_samples)
             texts = phrases[:num_samples]
 
@@ -761,14 +731,19 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             jsonl_path = dataset_dir / "data.jsonl"
             _write_jsonl(rows, jsonl_path)
 
-            # Build markdown content updates for on-screen prompts
-            combined_updates = []
+            # Build markdown and audio content updates for on-screen prompts
+            markdown_updates = []
+            audio_updates = []
             for i in range(MAX_COMPONENTS):
                 t = texts[i] if i < len(texts) else ""
                 if i < len(texts):
-                    combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                    markdown_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                    audio_updates.append(gr.update(visible=True))
                 else:
-                    combined_updates.append(gr.update(visible=False))
+                    markdown_updates.append(gr.update(visible=False))
+                    audio_updates.append(gr.update(visible=False))
+
+            combined_updates = markdown_updates + audio_updates
 
             return (str(jsonl_path), texts, *combined_updates)
 
