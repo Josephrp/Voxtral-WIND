@@ -401,7 +401,8 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     Read the phrases below and record them. Then start fine-tuning.
     """)
 
-    jsonl_out = gr.Textbox(label="Dataset JSONL path", interactive=False, visible=True)
+    # Hidden state to track dataset JSONL path
+    jsonl_path_state = gr.State("")
 
     # Language selection for NVIDIA Granary phrases
     language_selector = gr.Dropdown(
@@ -456,7 +457,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         markdowns = []
         recordings = []
         for idx in range(max_components):
-            visible = idx < 10  # Only first 10 visible initially
+            visible = False  # Initially hidden - will be revealed when language is selected
             phrase_text = ALL_PHRASES[idx] if idx < len(ALL_PHRASES) else ""
             md = gr.Markdown(f"**{idx+1}. {phrase_text}**", visible=visible)
             markdowns.append(md)
@@ -469,7 +470,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         phrase_markdowns, rec_components = create_recording_grid(MAX_COMPONENTS)
 
     # Add more rows button
-    add_rows_btn = gr.Button("➕ Add 10 More Rows", variant="secondary")
+    add_rows_btn = gr.Button("➕ Add 10 More Rows", variant="secondary", visible=False)
 
     def add_more_rows(current_visible, current_phrases):
         """Add 10 more rows by making them visible"""
@@ -491,7 +492,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         return [new_visible] + markdown_updates + audio_updates
 
     def change_language(language):
-        """Change the language and reload phrases from multilingual datasets"""
+        """Change the language and reload phrases from multilingual datasets, reveal interface"""
         new_phrases = load_multilingual_phrases(language, max_phrases=None)
         # Reset visible rows to 10
         visible_count = min(10, len(new_phrases), MAX_COMPONENTS)
@@ -511,15 +512,19 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
                 markdown_updates.append(gr.update(value=f"**{i+1}. **", visible=False))
                 audio_updates.append(gr.update(visible=False))
 
-        # Return: [phrases_state, visible_state] + markdown_updates + audio_updates
-        return [new_phrases, visible_count] + markdown_updates + audio_updates
+        # Reveal all interface elements when language is selected
+        reveal_updates = [
+            gr.update(visible=True),  # add_rows_btn
+            gr.update(visible=True),  # record_dataset_btn
+            gr.update(visible=True),  # dataset_status
+            gr.update(visible=True),  # advanced_accordion
+            gr.update(visible=True),  # save_rec_btn
+            gr.update(visible=True),  # start_btn
+            gr.update(visible=True),  # logs_box
+        ]
 
-    # Connect language change to phrase reloading
-    language_selector.change(
-        change_language,
-        inputs=[language_selector],
-        outputs=[phrase_texts_state, visible_rows_state] + phrase_markdowns + rec_components
-    )
+        # Return: [phrases_state, visible_state] + markdown_updates + audio_updates + reveal_updates
+        return [new_phrases, visible_count] + markdown_updates + audio_updates + reveal_updates
 
     add_rows_btn.click(
         add_more_rows,
@@ -528,7 +533,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     )
 
     # Recording dataset creation button
-    record_dataset_btn = gr.Button("🎙️ Create Dataset from Recordings", variant="primary")
+    record_dataset_btn = gr.Button("🎙️ Create Dataset from Recordings", variant="primary", visible=False)
 
     def create_recording_dataset(*recordings_and_state):
         """Create dataset from visible recordings and phrases"""
@@ -569,7 +574,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             return f"❌ Error creating dataset: {str(e)}"
 
     # Status display for dataset creation
-    dataset_status = gr.Textbox(label="Dataset Creation Status", interactive=False, visible=True)
+    dataset_status = gr.Textbox(label="Dataset Creation Status", interactive=False, visible=False)
 
     record_dataset_btn.click(
         create_recording_dataset,
@@ -578,7 +583,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     )
 
     # Advanced options accordion
-    with gr.Accordion("Advanced options", open=False):
+    with gr.Accordion("Advanced options", open=False, visible=False) as advanced_accordion:
         base_model = gr.Textbox(value="mistralai/Voxtral-Mini-3B-2507", label="Base Voxtral model")
         use_lora = gr.Checkbox(value=True, label="Use LoRA (parameter-efficient)")
         with gr.Row():
@@ -608,10 +613,11 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             lines = [s.strip() for s in (txt or "").splitlines() if s.strip()]
             return _save_uploaded_dataset(files or [], lines)
 
-        save_upload_btn.click(_collect_upload, [upload_audio, transcripts_box], [jsonl_out])
+        # Removed - no longer needed since jsonl_out was removed
+        # save_upload_btn.click(_collect_upload, [upload_audio, transcripts_box], [])
 
     # Save recordings button
-    save_rec_btn = gr.Button("Save recordings as dataset")
+    save_rec_btn = gr.Button("Save recordings as dataset", visible=False)
 
     def _collect_preloaded_recs(*recs_and_texts):
         import soundfile as sf
@@ -638,133 +644,32 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         _write_jsonl(rows, jsonl_path)
         return str(jsonl_path)
 
-    save_rec_btn.click(_collect_preloaded_recs, rec_components + [phrase_texts_state], [jsonl_out])
+    save_rec_btn.click(_collect_preloaded_recs, rec_components + [phrase_texts_state], [jsonl_path_state])
 
-    # Quick sample from multilingual datasets (Common Voice, etc.)
-    with gr.Row():
-        vp_lang = gr.Dropdown(choices=["en", "de", "fr", "es", "it", "pl", "pt", "nl", "ru", "ar", "zh", "ja", "ko", "da", "sv", "fi", "et", "cs", "hr", "bg", "uk", "ro", "hu", "el"], value="en", label="Sample Language")
-        vp_samples = gr.Number(value=20, precision=0, label="Num samples")
-        vp_split = gr.Dropdown(choices=["train", "validation", "test"], value="train", label="Split")
-        vp_btn = gr.Button("Use Multilingual Dataset Sample")
+    # Removed multilingual dataset sample section - phrases are now loaded automatically when language is selected
 
-        def _collect_multilingual_sample(lang_code: str, num_samples: int, split: str):
-            """Collect sample audio and text from NVIDIA Granary dataset"""
-            from datasets import load_dataset, Audio
-            import random
-
-            # Map language code to Granary format
-            granary_lang_map = {
-                "en": "en", "de": "de", "fr": "fr", "es": "es", "it": "it",
-                "pl": "pl", "pt": "pt", "nl": "nl", "ru": "ru", "ar": "ar",
-                "zh": "zh", "ja": "ja", "ko": "ko", "da": "da", "sv": "sv",
-                "no": "no", "fi": "fi", "et": "et", "lv": "lv", "lt": "lt",
-                "sl": "sl", "sk": "sk", "cs": "cs", "hr": "hr", "bg": "bg",
-                "uk": "uk", "ro": "ro", "hu": "hu", "el": "el", "mt": "mt"
-            }
-
-            granary_lang = granary_lang_map.get(lang_code, "en")
-
-            try:
-                print(f"Collecting {num_samples} samples from NVIDIA Granary dataset for language: {lang_code}")
-
-                # Load Granary dataset with ASR split
-                ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True)
-
-                dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
-                rows = []
-                texts = []
-                count = 0
-
-                # Sample from the dataset
-                for example in ds:
-                    if count >= num_samples:
-                        break
-
-                    text = example.get("text", "").strip()
-                    audio_path = example.get("audio_filepath", "")
-
-                    # Filter for quality samples
-                    if (text and
-                        len(text) > 10 and
-                        len(text) < 200 and
-                        audio_path):  # Must have audio file
-
-                        rows.append({
-                            "audio_path": audio_path,
-                            "text": text
-                        })
-                        texts.append(text)
-                        count += 1
-
-                if rows:
-                    jsonl_path = dataset_dir / "data.jsonl"
-                    _write_jsonl(rows, jsonl_path)
-
-                    print(f"Successfully collected {len(rows)} samples from Granary dataset")
-
-                    # Build markdown and audio content updates for on-screen prompts
-                    markdown_updates = []
-                    audio_updates = []
-                    for i in range(MAX_COMPONENTS):
-                        t = texts[i] if i < len(texts) else ""
-                        if i < len(texts):
-                            markdown_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
-                            audio_updates.append(gr.update(visible=True))
-                        else:
-                            markdown_updates.append(gr.update(visible=False))
-                            audio_updates.append(gr.update(visible=False))
-
-                    combined_updates = markdown_updates + audio_updates
-
-                    return (str(jsonl_path), texts, *combined_updates)
-
-            except Exception as e:
-                print(f"Granary sample collection failed for {lang_code}: {e}")
-
-            # Fallback: generate text-only samples if Granary fails
-            print(f"Using fallback: generating text-only samples for {lang_code}")
-            phrases = load_multilingual_phrases(lang_code, max_phrases=num_samples)
-            texts = phrases[:num_samples]
-
-            dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
-            rows = [{"audio_path": "", "text": text} for text in texts]
-            jsonl_path = dataset_dir / "data.jsonl"
-            _write_jsonl(rows, jsonl_path)
-
-            # Build markdown and audio content updates for on-screen prompts
-            markdown_updates = []
-            audio_updates = []
-            for i in range(MAX_COMPONENTS):
-                t = texts[i] if i < len(texts) else ""
-                if i < len(texts):
-                    markdown_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
-                    audio_updates.append(gr.update(visible=True))
-                else:
-                    markdown_updates.append(gr.update(visible=False))
-                    audio_updates.append(gr.update(visible=False))
-
-            combined_updates = markdown_updates + audio_updates
-
-            return (str(jsonl_path), texts, *combined_updates)
-
-        vp_btn.click(
-            _collect_multilingual_sample,
-            [vp_lang, vp_samples, vp_split],
-            [jsonl_out, phrase_texts_state] + phrase_markdowns,
-        )
-
-    start_btn = gr.Button("Start Fine-tuning")
-    logs_box = gr.Textbox(label="Logs", lines=20)
+    start_btn = gr.Button("Start Fine-tuning", visible=False)
+    logs_box = gr.Textbox(label="Logs", lines=20, visible=False)
 
     start_btn.click(
         start_voxtral_training,
         inputs=[
-            use_lora, base_model, repo_short, jsonl_out, train_count, eval_count,
+            use_lora, base_model, repo_short, jsonl_path_state, train_count, eval_count,
             batch_size, grad_accum, learning_rate, epochs,
             lora_r, lora_alpha, lora_dropout, freeze_audio_tower,
             push_to_hub, deploy_demo,
         ],
         outputs=[logs_box],
+    )
+
+    # Connect language change to phrase reloading and interface reveal (placed after all components are defined)
+    language_selector.change(
+        change_language,
+        inputs=[language_selector],
+        outputs=[phrase_texts_state, visible_rows_state] + phrase_markdowns + rec_components + [
+            add_rows_btn, record_dataset_btn, dataset_status, advanced_accordion,
+            save_rec_btn, start_btn, logs_box
+        ]
     )
 
 
