@@ -251,8 +251,13 @@ def start_voxtral_training(
             yield line
 
 
-def load_voxpopuli_phrases(language="en", max_phrases=None, split="train"):
-    """Load phrases from VoxPopuli dataset.
+def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
+    """Load phrases from various multilingual speech datasets.
+
+    Tries multiple datasets in order of preference:
+    1. Common Voice (most reliable and up-to-date)
+    2. FLEURS (Google's multilingual dataset)
+    3. Fallback to basic phrases
 
     Args:
         language: Language code (e.g., 'en', 'de', 'fr', etc.)
@@ -262,43 +267,121 @@ def load_voxpopuli_phrases(language="en", max_phrases=None, split="train"):
     Returns:
         List of normalized text phrases
     """
+    from datasets import load_dataset
+    import random
+
+    # Language code mapping for different datasets
+    lang_mappings = {
+        "en": {"common_voice": "en", "fleurs": "en_us"},
+        "de": {"common_voice": "de", "fleurs": "de_de"},
+        "fr": {"common_voice": "fr", "fleurs": "fr_fr"},
+        "es": {"common_voice": "es", "fleurs": "es_419"},
+        "it": {"common_voice": "it", "fleurs": "it_it"},
+        "pt": {"common_voice": "pt", "fleurs": "pt_br"},
+        "pl": {"common_voice": "pl", "fleurs": "pl_pl"},
+        "nl": {"common_voice": "nl", "fleurs": "nl_nl"},
+        "ru": {"common_voice": "ru", "fleurs": "ru_ru"},
+        "ar": {"common_voice": "ar", "fleurs": "ar_eg"},
+        "zh": {"common_voice": "zh-CN", "fleurs": "zh_cn"},
+        "ja": {"common_voice": "ja", "fleurs": "ja_jp"},
+        "ko": {"common_voice": "ko", "fleurs": "ko_kr"},
+    }
+
+    lang_config = lang_mappings.get(language, {"common_voice": language, "fleurs": f"{language}_{language}"})
+
+    # Try Common Voice first (most reliable)
     try:
-        from datasets import load_dataset
-        import random
+        print(f"Trying Common Voice dataset for language: {language}")
+        cv_lang = lang_config["common_voice"]
+        ds = load_dataset("mozilla-foundation/common_voice_11_0", cv_lang, split=split, streaming=True)
 
-        # Load the specified language dataset
-        ds = load_dataset("facebook/voxpopuli", language, split=split)
-
-        # Extract normalized text phrases
         phrases = []
+        count = 0
         for example in ds:
-            text = example.get("normalized_text", "").strip()
+            if max_phrases and count >= max_phrases:
+                break
+            text = example.get("sentence", "").strip()
             if text and len(text) > 10:  # Filter out very short phrases
                 phrases.append(text)
+                count += 1
 
-        # Shuffle and limit if specified
-        if max_phrases:
-            phrases = random.sample(phrases, min(max_phrases, len(phrases)))
-        else:
-            # If no limit, shuffle the entire list
+        if phrases:
+            print(f"Successfully loaded {len(phrases)} phrases from Common Voice")
             random.shuffle(phrases)
-
-        return phrases
+            return phrases
 
     except Exception as e:
-        print(f"Error loading VoxPopuli phrases: {e}")
-        # Fallback to some basic phrases if loading fails
-        return [
-            "The quick brown fox jumps over the lazy dog.",
-            "Please say your full name.",
-            "Today is a good day to learn something new.",
-            "Artificial intelligence helps with many tasks.",
-            "I enjoy reading books and listening to music.",
-        ]
+        print(f"Common Voice failed: {e}")
+
+    # Try FLEURS as backup
+    try:
+        print(f"Trying FLEURS dataset for language: {language}")
+        fleurs_lang = lang_config["fleurs"]
+        ds = load_dataset("google/fleurs", fleurs_lang, split=split, streaming=True)
+
+        phrases = []
+        count = 0
+        for example in ds:
+            if max_phrases and count >= max_phrases:
+                break
+            text = example.get("transcription", "").strip()
+            if text and len(text) > 10:  # Filter out very short phrases
+                phrases.append(text)
+                count += 1
+
+        if phrases:
+            print(f"Successfully loaded {len(phrases)} phrases from FLEURS")
+            random.shuffle(phrases)
+            return phrases
+
+    except Exception as e:
+        print(f"FLEURS failed: {e}")
+
+    # Final fallback to basic phrases
+    print("All dataset loading attempts failed, using fallback phrases")
+    fallback_phrases = [
+        "The quick brown fox jumps over the lazy dog.",
+        "Please say your full name.",
+        "Today is a good day to learn something new.",
+        "Artificial intelligence helps with many tasks.",
+        "I enjoy reading books and listening to music.",
+        "This is a sample sentence for testing speech.",
+        "Speak clearly and at a normal pace.",
+        "Numbers like one, two, three are easy to say.",
+        "The weather is sunny with a chance of rain.",
+        "Thank you for taking the time to help.",
+        "Hello, how are you today?",
+        "I would like to order a pizza.",
+        "The meeting is scheduled for tomorrow.",
+        "Please call me back as soon as possible.",
+        "Thank you for your assistance.",
+        "Can you help me with this problem?",
+        "I need to make a reservation.",
+        "The weather looks beautiful outside.",
+        "Let's go for a walk in the park.",
+        "I enjoy listening to classical music.",
+        "What time does the store open?",
+        "I forgot my password again.",
+        "Please send me the invoice.",
+        "The project is almost complete.",
+        "I appreciate your hard work.",
+        "Let's schedule a meeting next week.",
+        "The food tastes delicious.",
+        "I need to buy some groceries.",
+        "Please turn off the lights.",
+        "The presentation went very well.",
+    ]
+
+    if max_phrases:
+        fallback_phrases = random.sample(fallback_phrases, min(max_phrases, len(fallback_phrases)))
+    else:
+        random.shuffle(fallback_phrases)
+
+    return fallback_phrases
 
 # Initialize phrases dynamically
-VOXPOPULI_LANGUAGE = "en"  # Default to English
-ALL_PHRASES = load_voxpopuli_phrases(VOXPOPULI_LANGUAGE, max_phrases=None)
+DEFAULT_LANGUAGE = "en"  # Default to English
+ALL_PHRASES = load_multilingual_phrases(DEFAULT_LANGUAGE, max_phrases=None)
 
 with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     has_gpu, gpu_msg = detect_nvidia_driver()
@@ -337,12 +420,15 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
     jsonl_out = gr.Textbox(label="Dataset JSONL path", interactive=False, visible=True)
 
-    # Language selection for VoxPopuli phrases
-    voxpopuli_lang = gr.Dropdown(
-        choices=["en", "de", "fr", "es", "pl", "it", "ro", "hu", "cs", "nl", "fi", "hr", "sk", "sl", "et", "lt"],
+    # Language selection for multilingual phrases
+    language_selector = gr.Dropdown(
+        choices=[
+            "en", "de", "fr", "es", "it", "pt", "pl", "nl", "ru",
+            "ar", "zh", "ja", "ko", "tr", "ca", "sv", "fi", "da"
+        ],
         value="en",
-        label="VoxPopuli Language",
-        info="Select language for phrases from VoxPopuli dataset"
+        label="Language for Speech Phrases",
+        info="Select language for phrases from Common Voice, FLEURS, or fallback datasets"
     )
 
     # Recording grid with dynamic text readouts
@@ -383,8 +469,8 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         return [new_visible] + visibility_updates
 
     def change_language(language):
-        """Change the language and reload phrases from VoxPopuli"""
-        new_phrases = load_voxpopuli_phrases(language, max_phrases=None)
+        """Change the language and reload phrases from multilingual datasets"""
+        new_phrases = load_multilingual_phrases(language, max_phrases=None)
         # Reset visible rows to 10
         visible_count = min(10, len(new_phrases))
 
@@ -407,9 +493,9 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         return [new_phrases, visible_count] + combined_updates
 
     # Connect language change to phrase reloading
-    voxpopuli_lang.change(
+    language_selector.change(
         change_language,
-        inputs=[voxpopuli_lang],
+        inputs=[language_selector],
         outputs=[phrase_texts_state, visible_rows_state] + phrase_markdowns + rec_components
     )
 
@@ -482,40 +568,78 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
 
     save_rec_btn.click(_collect_preloaded_recs, rec_components + [phrase_texts_state], [jsonl_out])
 
-    # Quick sample from VoxPopuli (few random rows)
+    # Quick sample from multilingual datasets (Common Voice, etc.)
     with gr.Row():
-        vp_lang = gr.Dropdown(choices=["en", "de", "fr", "es", "it", "pl", "ro", "hu", "cs", "nl", "fi", "hr", "sk", "sl", "et", "lt"], value="en", label="VoxPopuli language")
+        vp_lang = gr.Dropdown(choices=["en", "de", "fr", "es", "it", "pl", "pt", "nl", "ru", "ar", "zh", "ja", "ko"], value="en", label="Sample Language")
         vp_samples = gr.Number(value=20, precision=0, label="Num samples")
         vp_split = gr.Dropdown(choices=["train", "validation", "test"], value="train", label="Split")
-        vp_btn = gr.Button("Use VoxPopuli sample")
+        vp_btn = gr.Button("Use Multilingual Dataset Sample")
 
-        def _collect_voxpopuli(lang_code: str, num_samples: int, split: str):
-            import sys
-            # Workaround for dill on Python 3.13 expecting __main__ during import
-            if "__main__" not in sys.modules:
-                sys.modules["__main__"] = sys.modules[__name__]
-            from datasets import load_dataset, Audio  # type: ignore
+        def _collect_multilingual_sample(lang_code: str, num_samples: int, split: str):
+            """Load sample from multilingual datasets (Common Voice preferred)"""
+            from datasets import load_dataset, Audio
             import random
-            ds = load_dataset("facebook/voxpopuli", lang_code, split=split)
-            ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-            # shuffle and select
-            total = len(ds)
-            k = max(1, min(int(num_samples or 1), total))
-            ds = ds.shuffle(seed=random.randint(1, 10_000))
-            ds_sel = ds.select(range(k))
+
+            # Language code mapping for Common Voice
+            cv_lang_map = {
+                "en": "en", "de": "de", "fr": "fr", "es": "es", "it": "it",
+                "pl": "pl", "pt": "pt", "nl": "nl", "ru": "ru", "ar": "ar",
+                "zh": "zh-CN", "ja": "ja", "ko": "ko"
+            }
+
+            cv_lang = cv_lang_map.get(lang_code, lang_code)
+
+            try:
+                # Try Common Voice first
+                ds = load_dataset("mozilla-foundation/common_voice_11_0", cv_lang, split=split, streaming=True)
+                ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+
+                dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
+                rows: list[dict] = []
+                texts: list[str] = []
+
+                count = 0
+                for ex in ds:
+                    if count >= num_samples:
+                        break
+
+                    audio = ex.get("audio") or {}
+                    path = audio.get("path")
+                    text = ex.get("sentence", "").strip()
+
+                    if path and text and len(text) > 10:
+                        rows.append({"audio_path": path, "text": text})
+                        texts.append(str(text))
+                        count += 1
+
+                if rows:
+                    jsonl_path = dataset_dir / "data.jsonl"
+                    _write_jsonl(rows, jsonl_path)
+
+                    # Build markdown content updates for on-screen prompts
+                    combined_updates = []
+                    for i in range(len(phrase_markdowns)):
+                        t = texts[i] if i < len(texts) else ""
+                        if i < len(texts):
+                            combined_updates.append(gr.update(value=f"**{i+1}. {t}**", visible=True))
+                        else:
+                            combined_updates.append(gr.update(visible=False))
+
+                    return (str(jsonl_path), texts, *combined_updates)
+
+            except Exception as e:
+                print(f"Common Voice sample loading failed: {e}")
+
+            # Fallback: generate synthetic samples with text only
+            print("Using fallback: generating text-only samples")
+            phrases = load_multilingual_phrases(lang_code, max_phrases=num_samples)
+            texts = phrases[:num_samples]
 
             dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
-            rows: list[dict] = []
-            texts: list[str] = []
-            for ex in ds_sel:
-                audio = ex.get("audio") or {}
-                path = audio.get("path")
-                text = ex.get("normalized_text") or ex.get("raw_text") or ""
-                if path and text is not None:
-                    rows.append({"audio_path": path, "text": text})
-                    texts.append(str(text))
+            rows = [{"audio_path": "", "text": text} for text in texts]
             jsonl_path = dataset_dir / "data.jsonl"
             _write_jsonl(rows, jsonl_path)
+
             # Build markdown content updates for on-screen prompts
             combined_updates = []
             for i in range(len(phrase_markdowns)):
@@ -528,7 +652,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             return (str(jsonl_path), texts, *combined_updates)
 
         vp_btn.click(
-            _collect_voxpopuli,
+            _collect_multilingual_sample,
             [vp_lang, vp_samples, vp_split],
             [jsonl_out, phrase_texts_state] + phrase_markdowns,
         )
