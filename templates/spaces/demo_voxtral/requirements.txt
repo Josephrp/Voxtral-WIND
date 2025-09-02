@@ -1,0 +1,7 @@
+gradio>=5.38.2
+torch
+transformers
+datasets
+soundfile
+librosa
+
