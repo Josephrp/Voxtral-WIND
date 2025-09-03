@@ -1,8 +1,32 @@
 #!/usr/bin/env python3
+"""
+Voxtral ASR LoRA Fine-tuning Script with Trackio Integration
+
+This script fine-tunes Voxtral models using LoRA for ASR tasks with automatic experiment tracking
+via Trackio and Hugging Face Spaces.
+
+Features:
+- Automatic username detection from HF_TOKEN environment variable
+- Auto-generated space names with timestamps
+- Local-only mode when no HF_TOKEN is set
+- Comprehensive experiment logging
+- LoRA-specific hyperparameters tracking
+- Optional dataset pushing to Hugging Face Hub
+
+Authentication:
+Set HF_TOKEN environment variable to enable automatic space creation:
+  Linux/Mac: export HF_TOKEN=your_token_here
+  Windows: set HF_TOKEN=your_token_here
+  Or: export HUGGINGFACE_HUB_TOKEN=your_token_here
+
+Get your token from: https://huggingface.co/settings/tokens
+"""
 
 import argparse
 import json
 from pathlib import Path
+from datetime import datetime
+from typing import Tuple, Optional
 import torch
 from datasets import load_dataset, Audio, Dataset
 from transformers import (
@@ -12,6 +36,85 @@ from transformers import (
     TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model
+from huggingface_hub import HfApi
+import trackio
+
+
+def validate_hf_token(token: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Validate a Hugging Face token and return the username.
+
+    Args:
+        token (str): The Hugging Face token to validate
+
+    Returns:
+        Tuple[bool, Optional[str], Optional[str]]:
+            - success: True if token is valid, False otherwise
+            - username: The username associated with the token (if valid)
+            - error_message: Error message if validation failed
+    """
+    try:
+        # Create API client with token directly
+        api = HfApi(token=token)
+
+        # Try to get user info - this will fail if token is invalid
+        user_info = api.whoami()
+
+        # Extract username from user info
+        username = user_info.get("name", user_info.get("username"))
+
+        if not username:
+            return False, None, "Could not retrieve username from token"
+
+        return True, username, None
+
+    except Exception as e:
+        error_msg = str(e)
+        if "401" in error_msg or "unauthorized" in error_msg.lower():
+            return False, None, "Invalid token - unauthorized access"
+        elif "403" in error_msg:
+            return False, None, "Token lacks required permissions"
+        elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+            return False, None, f"Network error: {error_msg}"
+        else:
+            return False, None, f"Validation error: {error_msg}"
+
+
+def get_default_space_name(project_type: str = "voxtral-lora-finetuning") -> str:
+    """
+    Generate a default space name with username and timestamp.
+
+    Args:
+        project_type: Type of project (e.g., "voxtral-asr-finetuning", "voxtral-lora-finetuning")
+
+    Returns:
+        str: Default space name in format "username/project-type-timestamp"
+    """
+    try:
+        # Get token from environment variables only
+        import os
+        token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
+        if not token:
+            print("Warning: No HF_TOKEN or HUGGINGFACE_HUB_TOKEN environment variable found.")
+            print("Set HF_TOKEN environment variable to enable automatic space creation.")
+            print("Example: export HF_TOKEN=your_token_here")
+            print("Falling back to local-only mode.")
+            return None
+
+        # Validate token and get username
+        success, username, error = validate_hf_token(token)
+        if success and username:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            return f"{username}/{project_type}-{timestamp}"
+        else:
+            print(f"Warning: Token validation failed: {error}")
+            print("Falling back to local-only mode.")
+            return None
+
+    except Exception as e:
+        print(f"Warning: Failed to generate default space name: {e}")
+        return None
 
 
 class VoxtralDataCollator:
@@ -163,6 +266,12 @@ def main():
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.0)
     parser.add_argument("--freeze-audio-tower", action="store_true", help="Freeze audio encoder parameters")
+    parser.add_argument("--trackio-space", type=str, default=None,
+                        help="Hugging Face Space ID for trackio logging (format: username/space-name). If not provided, will auto-generate based on HF token")
+    parser.add_argument("--push-dataset", action="store_true",
+                        help="Push the training dataset to Hugging Face Hub after training")
+    parser.add_argument("--dataset-repo", type=str, default=None,
+                        help="Dataset repository name for pushing dataset (format: username/dataset-name)")
     args = parser.parse_args()
 
     model_checkpoint = args.model_checkpoint
@@ -170,6 +279,56 @@ def main():
 
     torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {torch_device}")
+
+    # Determine trackio space
+    trackio_space = args.trackio_space
+    if not trackio_space:
+        trackio_space = get_default_space_name("voxtral-lora-finetuning")
+
+    # Initialize trackio for experiment tracking
+    if trackio_space:
+        print(f"Initializing trackio with space: {trackio_space}")
+        trackio.init(
+            project="voxtral-lora-finetuning",
+            config={
+                "model_checkpoint": model_checkpoint,
+                "output_dir": output_dir,
+                "batch_size": args.batch_size,
+                "learning_rate": args.learning_rate,
+                "epochs": args.epochs,
+                "train_count": args.train_count,
+                "eval_count": args.eval_count,
+                "dataset_jsonl": args.dataset_jsonl,
+                "dataset_name": args.dataset_name,
+                "dataset_config": args.dataset_config,
+                "lora_r": args.lora_r,
+                "lora_alpha": args.lora_alpha,
+                "lora_dropout": args.lora_dropout,
+                "freeze_audio_tower": args.freeze_audio_tower,
+            },
+            space_id=trackio_space
+        )
+    else:
+        print("Initializing trackio in local-only mode")
+        trackio.init(
+            project="voxtral-lora-finetuning",
+            config={
+                "model_checkpoint": model_checkpoint,
+                "output_dir": output_dir,
+                "batch_size": args.batch_size,
+                "learning_rate": args.learning_rate,
+                "epochs": args.epochs,
+                "train_count": args.train_count,
+                "eval_count": args.eval_count,
+                "dataset_jsonl": args.dataset_jsonl,
+                "dataset_name": args.dataset_name,
+                "dataset_config": args.dataset_config,
+                "lora_r": args.lora_r,
+                "lora_alpha": args.lora_alpha,
+                "lora_dropout": args.lora_dropout,
+                "freeze_audio_tower": args.freeze_audio_tower,
+            }
+        )
 
     print("Loading processor and model...")
     processor = VoxtralProcessor.from_pretrained(model_checkpoint)
@@ -210,12 +369,12 @@ def main():
         learning_rate=args.learning_rate,
         num_train_epochs=args.epochs,
         bf16=True,
-        logging_steps=args.logging_issues if hasattr(args, 'logging_issues') else args.logging_steps,
+        logging_steps=args.logging_steps,
         eval_steps=args.save_steps if eval_dataset else None,
         save_steps=args.save_steps,
         eval_strategy="steps" if eval_dataset else "no",
         save_strategy="steps",
-        report_to="none",
+        report_to=["trackio"],
         remove_unused_columns=False,
         dataloader_num_workers=1,
     )
@@ -238,6 +397,44 @@ def main():
     if eval_dataset:
         results = trainer.evaluate()
         print(f"Final evaluation results: {results}")
+        # Log final evaluation results
+        trackio.log(results)
+
+    # Push dataset to Hub if requested
+    if args.push_dataset and args.dataset_jsonl:
+        print("Pushing dataset to Hugging Face Hub...")
+        try:
+            from pathlib import Path
+            import subprocess
+
+            dataset_repo = args.dataset_repo
+            if not dataset_repo:
+                # Auto-generate dataset repo name
+                if trackio_space:
+                    username = trackio_space.split('/')[0]
+                    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    dataset_repo = f"{username}/voxtral-dataset-{timestamp}"
+                else:
+                    print("Warning: Cannot auto-generate dataset repo name without HF token")
+                    dataset_repo = f"voxtral-dataset-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+            # Call the push script
+            push_cmd = [
+                "python", str(Path(__file__).parent / "push_to_huggingface.py"),
+                "dataset", args.dataset_jsonl, dataset_repo
+            ]
+
+            result = subprocess.run(push_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"✅ Dataset pushed to: https://huggingface.co/datasets/{dataset_repo}")
+            else:
+                print(f"❌ Failed to push dataset: {result.stderr}")
+
+        except Exception as e:
+            print(f"❌ Error pushing dataset: {e}")
+
+    # Finish trackio logging
+    trackio.finish()
 
     print("Training completed successfully!")
 

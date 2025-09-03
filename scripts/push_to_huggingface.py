@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """
-Push Trained Model and Results to Hugging Face Hub
-Integrates with Trackio monitoring and HF Datasets for complete model deployment
+Push Trained Models and Datasets to Hugging Face Hub
+
+Usage:
+    # Push a trained model
+    python push_to_huggingface.py model /path/to/model my-model-repo
+
+    # Push a dataset
+    python push_to_huggingface.py dataset /path/to/dataset.jsonl my-dataset-repo
+
+Authentication:
+Set HF_TOKEN environment variable or use --token:
+    export HF_TOKEN=your_token_here
 """
 
 import os
 import json
 import argparse
 import logging
-import time
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
-import subprocess
-import shutil
-import platform
 
 # Set timeout for HF operations to prevent hanging
 os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '300'
@@ -22,34 +28,15 @@ os.environ['HF_HUB_UPLOAD_TIMEOUT'] = '600'
 
 try:
     from huggingface_hub import HfApi, create_repo, upload_file
-    from huggingface_hub import snapshot_download, hf_hub_download
     HF_AVAILABLE = True
 except ImportError:
     HF_AVAILABLE = False
     print("Warning: huggingface_hub not available. Install with: pip install huggingface_hub")
 
-try:
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-    from monitoring import SmolLM3Monitor
-    MONITORING_AVAILABLE = True
-except ImportError:
-    MONITORING_AVAILABLE = False
-    print("Warning: monitoring module not available")
-
 logger = logging.getLogger(__name__)
 
-class TimeoutError(Exception):
-    """Custom timeout exception"""
-    pass
-
-def timeout_handler(signum, frame):
-    """Signal handler for timeout"""
-    raise TimeoutError("Operation timed out")
-
 class HuggingFacePusher:
-    """Push trained models and results to Hugging Face Hub with HF Datasets integration"""
+    """Push trained models to Hugging Face Hub"""
     
     def __init__(
         self,
@@ -57,44 +44,22 @@ class HuggingFacePusher:
         repo_name: str,
         token: Optional[str] = None,
         private: bool = False,
-        trackio_url: Optional[str] = None,
-        experiment_name: Optional[str] = None,
-        dataset_repo: Optional[str] = None,
-        hf_token: Optional[str] = None,
         author_name: Optional[str] = None,
         model_description: Optional[str] = None,
-        training_config_type: Optional[str] = None,
         model_name: Optional[str] = None,
-        dataset_name: Optional[str] = None,
-        batch_size: Optional[str] = None,
-        learning_rate: Optional[str] = None,
-        max_epochs: Optional[str] = None,
-        max_seq_length: Optional[str] = None,
-        trainer_type: Optional[str] = None
+        dataset_name: Optional[str] = None
     ):
         self.model_path = Path(model_path)
         # Original user input (may be just the repo name without username)
         self.repo_name = repo_name
-        self.token = token or hf_token or os.getenv('HF_TOKEN')
+        self.token = token or os.getenv('HF_TOKEN')
         self.private = private
-        self.trackio_url = trackio_url
-        self.experiment_name = experiment_name
         self.author_name = author_name
         self.model_description = model_description
-        
-        # Training configuration details for model card generation
-        self.training_config_type = training_config_type
-        self.model_name = model_name  
+
+        # Model card generation details
+        self.model_name = model_name
         self.dataset_name = dataset_name
-        self.batch_size = batch_size
-        self.learning_rate = learning_rate
-        self.max_epochs = max_epochs
-        self.max_seq_length = max_seq_length
-        self.trainer_type = trainer_type
-        
-        # HF Datasets configuration
-        self.dataset_repo = dataset_repo or os.getenv('TRACKIO_DATASET_REPO', 'tonic/trackio-experiments')
-        self.hf_token = hf_token or os.getenv('HF_TOKEN')
         
         # Initialize HF API
         if HF_AVAILABLE:
@@ -105,19 +70,7 @@ class HuggingFacePusher:
         # Resolve the full repo id (username/repo) if user only provided repo name
         self.repo_id = self._resolve_repo_id(self.repo_name)
 
-        # Initialize monitoring if available
-        self.monitor = None
-        if MONITORING_AVAILABLE:
-            self.monitor = SmolLM3Monitor(
-                experiment_name=experiment_name or "model_push",
-                trackio_url=trackio_url,
-                enable_tracking=bool(trackio_url),
-                hf_token=self.hf_token,
-                dataset_repo=self.dataset_repo
-            )
-        
         logger.info(f"Initialized HuggingFacePusher for {self.repo_id}")
-        logger.info(f"Dataset repository: {self.dataset_repo}")
 
     def _resolve_repo_id(self, repo_name: str) -> str:
         """Return a fully-qualified repo id in the form username/repo.
@@ -515,59 +468,33 @@ MIT License
             logger.error(f"❌ Failed to create README: {e}")
             return False
     
-    def log_to_trackio(self, action: str, details: Dict[str, Any]):
-        """Log push action to Trackio and HF Datasets"""
-        if self.monitor:
-            try:
-                # Log to Trackio
-                self.monitor.log_metrics({
-                    "push_action": action,
-                    "repo_name": self.repo_id,
-                    "model_size_gb": self._get_model_size(),
-                    "dataset_repo": self.dataset_repo,
-                    **details
-                })
-                
-                # Log training summary
-                self.monitor.log_training_summary({
-                    "model_push": True,
-                    "model_repo": self.repo_id,
-                    "dataset_repo": self.dataset_repo,
-                    "push_date": datetime.now().isoformat(),
-                    **details
-                })
-                
-                logger.info(f"✅ Logged {action} to Trackio and HF Datasets")
-            except Exception as e:
-                logger.error(f"❌ Failed to log to Trackio: {e}")
-    
-    def push_model(self, training_config: Optional[Dict[str, Any]] = None, 
+
+    def push_model(self, training_config: Optional[Dict[str, Any]] = None,
                    results: Optional[Dict[str, Any]] = None) -> bool:
-        """Complete model push process with HF Datasets integration"""
+        """Complete model push process"""
         logger.info(f"🚀 Starting model push to {self.repo_id}")
-        logger.info(f"📊 Dataset repository: {self.dataset_repo}")
-        
+
         # Validate model path
         if not self.validate_model_path():
             return False
-        
+
         # Create repository
         if not self.create_repository():
             return False
-        
+
         # Load training config and results if not provided
         if training_config is None:
             training_config = self._load_training_config()
-        
+
         if results is None:
             results = self._load_training_results()
-        
+
         # Create and upload model card
         model_card = self.create_model_card(training_config, results)
         model_card_path = Path("temp_model_card.md")
         with open(model_card_path, "w") as f:
             f.write(model_card)
-        
+
         try:
             upload_file(
                 path_or_fileobj=str(model_card_path),
@@ -577,27 +504,135 @@ MIT License
             )
         finally:
             model_card_path.unlink()
-        
+
         # Upload model files
         if not self.upload_model_files():
             return False
-        
+
         # Upload training results
         if results:
             self.upload_training_results(str(self.model_path))
-        
-        # Log to Trackio and HF Datasets
-        self.log_to_trackio("model_push", {
-            "model_path": str(self.model_path),
-            "repo_name": self.repo_name,
-            "private": self.private,
-            "training_config": training_config,
-            "results": results
-        })
-        
+
+        # Log success
+        logger.info(f"✅ Model successfully pushed to {self.repo_id}")
         logger.info(f"🎉 Model successfully pushed to: https://huggingface.co/{self.repo_id}")
-        logger.info(f"📊 Experiment data stored in: {self.dataset_repo}")
+
         return True
+
+    def push_dataset(self, dataset_path: str, dataset_repo_name: str) -> bool:
+        """Push dataset to Hugging Face Hub"""
+        logger.info(f"🚀 Starting dataset push to {dataset_repo_name}")
+
+        try:
+            from huggingface_hub import create_repo
+            import json
+
+            # Determine full dataset repo name
+            if "/" not in dataset_repo_name:
+                dataset_repo_name = f"{self.repo_id.split('/')[0]}/{dataset_repo_name}"
+
+            # Create dataset repository
+            try:
+                create_repo(dataset_repo_name, repo_type="dataset", token=self.token, exist_ok=True)
+                logger.info(f"✅ Created dataset repository: {dataset_repo_name}")
+            except Exception as e:
+                if "already exists" not in str(e).lower():
+                    logger.error(f"❌ Failed to create dataset repo: {e}")
+                    return False
+                logger.info(f"📁 Dataset repository already exists: {dataset_repo_name}")
+
+            # Read the dataset file
+            dataset_file = Path(dataset_path)
+            if not dataset_file.exists():
+                logger.error(f"❌ Dataset file not found: {dataset_path}")
+                return False
+
+            # Count lines for metadata
+            with open(dataset_file, 'r', encoding='utf-8') as f:
+                num_examples = sum(1 for _ in f)
+
+            file_size = dataset_file.stat().st_size
+
+            # Upload the dataset file
+            upload_file(
+                path_or_fileobj=str(dataset_file),
+                path_in_repo="data.jsonl",
+                repo_id=dataset_repo_name,
+                repo_type="dataset",
+                token=self.token
+            )
+            logger.info(f"✅ Uploaded dataset file: {dataset_file.name}")
+
+            # Create a dataset README
+            readme_content = f"""---
+dataset_info:
+  features:
+    - name: audio_path
+      dtype: string
+    - name: text
+      dtype: string
+  splits:
+    - name: train
+      num_bytes: {file_size}
+      num_examples: {num_examples}
+  download_size: {file_size}
+  dataset_size: {file_size}
+tags:
+- voxtral
+- asr
+- fine-tuning
+- conversational
+- speech-to-text
+- audio-to-text
+- tonic 
+---
+
+# Voxtral ASR Dataset
+
+This dataset was created for fine-tuning Voxtral ASR models.
+
+## Dataset Structure
+
+- **audio_path**: Path to the audio file
+- **text**: Transcription of the audio
+
+## Statistics
+
+- Number of examples: {num_examples}
+- File size: {file_size} bytes
+
+## Usage
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("{dataset_repo_name}")
+```
+"""
+
+            # Upload README
+            readme_path = dataset_file.parent / "README.md"
+            with open(readme_path, "w") as f:
+                f.write(readme_content)
+
+            upload_file(
+                path_or_fileobj=str(readme_path),
+                path_in_repo="README.md",
+                repo_id=dataset_repo_name,
+                repo_type="dataset",
+                token=self.token
+            )
+
+            readme_path.unlink()  # Clean up temp file
+
+            logger.info(f"✅ Dataset README uploaded")
+            logger.info(f"🎉 Dataset successfully pushed to: https://huggingface.co/datasets/{dataset_repo_name}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to push dataset: {e}")
+            return False
     
     def _load_training_config(self) -> Dict[str, Any]:
         """Load training configuration"""
@@ -619,81 +654,94 @@ def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Push trained model to Hugging Face Hub')
     
-    # Required arguments
-    parser.add_argument('model_path', type=str, help='Path to trained model directory')
-    parser.add_argument('repo_name', type=str, help='Hugging Face repository name (repo-name). Username will be auto-detected from your token.')
-    
-    # Optional arguments
-    parser.add_argument('--token', type=str, default=None, help='Hugging Face token')
-    parser.add_argument('--hf-token', type=str, default=None, help='Hugging Face token (alternative to --token)')
-    parser.add_argument('--private', action='store_true', help='Make repository private')
-    parser.add_argument('--trackio-url', type=str, default=None, help='Trackio Space URL for logging')
-    parser.add_argument('--experiment-name', type=str, default=None, help='Experiment name for Trackio')
-    parser.add_argument('--dataset-repo', type=str, default=None, help='HF Dataset repository for experiment storage')
-    parser.add_argument('--author-name', type=str, default=None, help='Author name for model card')
-    parser.add_argument('--model-description', type=str, default=None, help='Model description for model card')
-    parser.add_argument('--training-config-type', type=str, default=None, help='Training configuration type')
-    parser.add_argument('--model-name', type=str, default=None, help='Base model name')
-    parser.add_argument('--dataset-name', type=str, default=None, help='Dataset name')
-    parser.add_argument('--batch-size', type=str, default=None, help='Batch size')
-    parser.add_argument('--learning-rate', type=str, default=None, help='Learning rate')
-    parser.add_argument('--max-epochs', type=str, default=None, help='Maximum epochs')
-    parser.add_argument('--max-seq-length', type=str, default=None, help='Maximum sequence length')
-    parser.add_argument('--trainer-type', type=str, default=None, help='Trainer type')
+    # Subcommands
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # Model push subcommand
+    model_parser = subparsers.add_parser('model', help='Push trained model to Hugging Face Hub')
+    model_parser.add_argument('model_path', type=str, help='Path to trained model directory')
+    model_parser.add_argument('repo_name', type=str, help='Hugging Face repository name (repo-name). Username will be auto-detected from your token.')
+    model_parser.add_argument('--token', type=str, default=None, help='Hugging Face token')
+    model_parser.add_argument('--private', action='store_true', help='Make repository private')
+    model_parser.add_argument('--author-name', type=str, default=None, help='Author name for model card')
+    model_parser.add_argument('--model-description', type=str, default=None, help='Model description for model card')
+    model_parser.add_argument('--model-name', type=str, default=None, help='Base model name')
+    model_parser.add_argument('--dataset-name', type=str, default=None, help='Dataset name')
+
+    # Dataset push subcommand
+    dataset_parser = subparsers.add_parser('dataset', help='Push dataset to Hugging Face Hub')
+    dataset_parser.add_argument('dataset_path', type=str, help='Path to dataset JSONL file')
+    dataset_parser.add_argument('repo_name', type=str, help='Hugging Face dataset repository name')
+    dataset_parser.add_argument('--token', type=str, default=None, help='Hugging Face token')
+    dataset_parser.add_argument('--private', action='store_true', help='Make repository private')
     
     return parser.parse_args()
 
 def main():
     """Main function"""
     args = parse_args()
-    
+
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
-    logger.info("Starting model push to Hugging Face Hub")
-    
-    # Initialize pusher
-    try:
-        pusher = HuggingFacePusher(
-            model_path=args.model_path,
-            repo_name=args.repo_name,
-            token=args.token,
-            private=args.private,
-            trackio_url=args.trackio_url,
-            experiment_name=args.experiment_name,
-            dataset_repo=args.dataset_repo,
-            hf_token=args.hf_token,
-            author_name=args.author_name,
-            model_description=args.model_description,
-            training_config_type=args.training_config_type,
-            model_name=args.model_name,
-            dataset_name=args.dataset_name,
-            batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
-            max_epochs=args.max_epochs,
-            max_seq_length=args.max_seq_length,
-            trainer_type=args.trainer_type
-        )
-        
-        # Push model
-        success = pusher.push_model()
-        
-        if success:
-            logger.info("✅ Model push completed successfully!")
-            logger.info(f"🌐 View your model at: https://huggingface.co/{args.repo_name}")
-            if args.dataset_repo:
-                logger.info(f"📊 View experiment data at: https://huggingface.co/datasets/{args.dataset_repo}")
-        else:
-            logger.error("❌ Model push failed!")
-            return 1
-            
-    except Exception as e:
-        logger.error(f"❌ Error during model push: {e}")
+
+    if not args.command:
+        logger.error("❌ No command specified. Use 'model' or 'dataset' subcommand.")
         return 1
-    
+
+    try:
+        if args.command == 'model':
+            logger.info("Starting model push to Hugging Face Hub")
+
+            # Initialize pusher
+            pusher = HuggingFacePusher(
+                model_path=args.model_path,
+                repo_name=args.repo_name,
+                token=args.token,
+                private=args.private,
+                author_name=args.author_name,
+                model_description=args.model_description,
+                model_name=args.model_name,
+                dataset_name=args.dataset_name
+            )
+
+            # Push model
+            success = pusher.push_model()
+
+            if success:
+                logger.info("✅ Model push completed successfully!")
+                logger.info(f"🌐 View your model at: https://huggingface.co/{args.repo_name}")
+            else:
+                logger.error("❌ Model push failed!")
+                return 1
+
+        elif args.command == 'dataset':
+            logger.info("Starting dataset push to Hugging Face Hub")
+
+            # Initialize pusher for dataset
+            pusher = HuggingFacePusher(
+                model_path="",  # Not needed for dataset push
+                repo_name=args.repo_name,
+                token=args.token,
+                private=args.private
+            )
+
+            # Push dataset
+            success = pusher.push_dataset(args.dataset_path, args.repo_name)
+
+            if success:
+                logger.info("✅ Dataset push completed successfully!")
+                logger.info(f"📊 View your dataset at: https://huggingface.co/datasets/{args.repo_name}")
+            else:
+                logger.error("❌ Dataset push failed!")
+                return 1
+
+    except Exception as e:
+        logger.error(f"❌ Error during push: {e}")
+        return 1
+
     return 0
 
 if __name__ == "__main__":

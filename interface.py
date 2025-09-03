@@ -155,6 +155,104 @@ def _save_uploaded_dataset(files: list, transcripts: list[str]) -> str:
     return str(jsonl_path)
 
 
+def _push_dataset_to_hub(jsonl_path: str, repo_name: str, username: str = "") -> str:
+    """Push dataset to Hugging Face Hub"""
+    try:
+        from huggingface_hub import HfApi, create_repo
+        import json
+        from pathlib import Path
+
+        token = os.getenv("HF_TOKEN") or os.getenv("HF_WRITE_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
+        if not token:
+            return "❌ No HF_TOKEN found. Set HF_TOKEN environment variable to push datasets."
+
+        api = HfApi(token=token)
+
+        # Determine full repo name
+        if "/" not in repo_name:
+            if not username:
+                user_info = api.whoami()
+                username = user_info.get("name") or user_info.get("username") or ""
+            if username:
+                repo_name = f"{username}/{repo_name}"
+
+        # Create dataset repository
+        try:
+            create_repo(repo_name, repo_type="dataset", token=token, exist_ok=True)
+        except Exception as e:
+            if "already exists" not in str(e).lower():
+                return f"❌ Failed to create dataset repo: {e}"
+
+        # Read the JSONL file
+        jsonl_file = Path(jsonl_path)
+        if not jsonl_file.exists():
+            return f"❌ Dataset file not found: {jsonl_path}"
+
+        # Upload the JSONL file
+        api.upload_file(
+            path_or_fileobj=str(jsonl_file),
+            path_in_repo="data.jsonl",
+            repo_id=repo_name,
+            repo_type="dataset",
+            token=token
+        )
+
+        # Create a simple README for the dataset
+        readme_content = f"""---
+dataset_info:
+  features:
+    - name: audio_path
+      dtype: string
+    - name: text
+      dtype: string
+  splits:
+    - name: train
+      num_bytes: {jsonl_file.stat().st_size}
+      num_examples: {sum(1 for _ in open(jsonl_file))}
+  download_size: {jsonl_file.stat().st_size}
+  dataset_size: {jsonl_file.stat().st_size}
+---
+
+# Voxtral ASR Dataset
+
+This dataset was created using the Voxtral ASR Fine-tuning Interface.
+
+## Dataset Structure
+
+- **audio_path**: Path to the audio file
+- **text**: Transcription of the audio
+
+## Usage
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("{repo_name}")
+```
+"""
+
+        # Upload README
+        readme_path = jsonl_file.parent / "README.md"
+        with open(readme_path, "w") as f:
+            f.write(readme_content)
+
+        api.upload_file(
+            path_or_fileobj=str(readme_path),
+            path_in_repo="README.md",
+            repo_id=repo_name,
+            repo_type="dataset",
+            token=token
+        )
+
+        readme_path.unlink()  # Clean up temp file
+
+        return f"✅ Dataset pushed to: https://huggingface.co/datasets/{repo_name}"
+
+    except Exception as e:
+        return f"❌ Failed to push dataset: {e}"
+
+
 def _save_recordings(recordings: list[tuple[int, list]], transcripts: list[str]) -> str:
     import soundfile as sf
     dataset_dir = PROJECT_ROOT / "datasets" / "voxtral_user"
@@ -231,6 +329,7 @@ def start_voxtral_training(
         repo_name = f"{username}/{repo_short}" if username else repo_short
         push_args = [
             str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
+            "model",
             str(output_dir),
             repo_name,
         ]
@@ -519,6 +618,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             gr.update(visible=True),  # dataset_status
             gr.update(visible=True),  # advanced_accordion
             gr.update(visible=True),  # save_rec_btn
+            gr.update(visible=True),  # push_recordings_btn
             gr.update(visible=True),  # start_btn
             gr.update(visible=True),  # logs_box
         ]
@@ -607,17 +707,27 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         gr.Markdown("### Upload audio + transcripts (optional)")
         upload_audio = gr.File(file_count="multiple", type="filepath", label="Upload WAV/FLAC files (optional)")
         transcripts_box = gr.Textbox(lines=6, label="Transcripts (one per line, aligned with files)")
+        dataset_repo_name = gr.Textbox(value=f"voxtral-dataset-{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                                       label="Dataset repo name (will be pushed to HF Hub)")
         save_upload_btn = gr.Button("Save uploaded dataset")
+        push_dataset_btn = gr.Button("Push dataset to HF Hub")
 
         def _collect_upload(files, txt):
             lines = [s.strip() for s in (txt or "").splitlines() if s.strip()]
-            return _save_uploaded_dataset(files or [], lines)
+            jsonl_path = _save_uploaded_dataset(files or [], lines)
+            return f"✅ Dataset saved locally: {jsonl_path}"
 
-        # Removed - no longer needed since jsonl_out was removed
-        # save_upload_btn.click(_collect_upload, [upload_audio, transcripts_box], [])
+        def _push_dataset_handler(repo_name):
+            if not jsonl_path_state.value:
+                return "❌ No dataset saved yet. Please save dataset first."
+            return _push_dataset_to_hub(jsonl_path_state.value, repo_name)
+
+        save_upload_btn.click(_collect_upload, [upload_audio, transcripts_box], [jsonl_path_state])
+        push_dataset_btn.click(_push_dataset_handler, [dataset_repo_name], [jsonl_path_state])
 
     # Save recordings button
     save_rec_btn = gr.Button("Save recordings as dataset", visible=False)
+    push_recordings_btn = gr.Button("Push recordings dataset to HF Hub", visible=False)
 
     def _collect_preloaded_recs(*recs_and_texts):
         import soundfile as sf
@@ -645,6 +755,13 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         return str(jsonl_path)
 
     save_rec_btn.click(_collect_preloaded_recs, rec_components + [phrase_texts_state], [jsonl_path_state])
+
+    def _push_recordings_handler(repo_name):
+        if not jsonl_path_state.value:
+            return "❌ No recordings dataset saved yet. Please save recordings first."
+        return _push_dataset_to_hub(jsonl_path_state.value, repo_name)
+
+    push_recordings_btn.click(_push_recordings_handler, [dataset_repo_name], [jsonl_path_state])
 
     # Removed multilingual dataset sample section - phrases are now loaded automatically when language is selected
 
