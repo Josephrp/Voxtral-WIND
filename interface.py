@@ -388,9 +388,17 @@ def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
     try:
         print(f"Loading phrases from NVIDIA Granary dataset for language: {language}")
 
+        # Check for authentication token
+        token = os.getenv("HF_TOKEN") or os.getenv("HF_WRITE_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
         # Load Granary dataset with ASR (speech recognition) split
         # Use streaming to handle large datasets efficiently
-        ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True)
+        if token:
+            print(f"Using authentication token for Granary dataset access")
+            ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True, token=token)
+        else:
+            print(f"No HF_TOKEN found, attempting to load Granary dataset without authentication")
+            ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True)
 
         phrases = []
         count = 0
@@ -427,7 +435,12 @@ def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
             raise Exception("No phrases found")
 
     except Exception as e:
-        print(f"Granary dataset loading failed for {language}: {e}")
+        error_msg = str(e).lower()
+        if "401" in error_msg or "unauthorized" in error_msg:
+            print(f"Granary dataset authentication failed for {language}: {e}")
+            print("This dataset requires a Hugging Face token. Please set HF_TOKEN environment variable.")
+        else:
+            print(f"Granary dataset loading failed for {language}: {e}")
 
         # Fallback to basic phrases if Granary fails
         print("Using fallback phrases")
@@ -499,6 +512,23 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     # 🎙️ Voxtral ASR Fine-tuning
     Read the phrases below and record them. Then start fine-tuning.
     """)
+
+    # Check for HF_TOKEN and show warning if missing
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_WRITE_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+    if not hf_token:
+        gr.HTML(
+            """
+            <div style="background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                <p style="color: rgb(234, 88, 12); margin: 0; font-size: 14px; font-weight: 600;">
+                    ⚠️ No HF_TOKEN detected
+                </p>
+                <p style="color: rgb(234, 88, 12); margin: 6px 0 0; font-size: 12px;">
+                    Set HF_TOKEN environment variable to access NVIDIA Granary dataset with authentic multilingual phrases.
+                    Currently using fallback phrases for demonstration.
+                </p>
+            </div>
+            """
+        )
 
     # Hidden state to track dataset JSONL path
     jsonl_path_state = gr.State("")
@@ -785,7 +815,7 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         inputs=[language_selector],
         outputs=[phrase_texts_state, visible_rows_state] + phrase_markdowns + rec_components + [
             add_rows_btn, record_dataset_btn, dataset_status, advanced_accordion,
-            save_rec_btn, start_btn, logs_box
+            save_rec_btn, push_recordings_btn, start_btn, logs_box
         ]
     )
 
