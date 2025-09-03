@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxtral ASR Fine-tuning - Architecture Diagrams</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#e3f2fd',
+                primaryTextColor: '#1976d2',
+                primaryBorderColor: '#01579b',
+                lineColor: '#424242',
+                secondaryColor: '#fff3e0',
+                tertiaryColor: '#fce4ec',
+                background: '#ffffff',
+                mainBkg: '#ffffff',
+                secondBkg: '#f5f5f5',
+                textColor: '#333333'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            sequence: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .diagram-container {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .diagram-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #1976d2;
+            border-bottom: 2px solid #e3f2fd;
+            padding-bottom: 10px;
+        }
+
+        .diagram-description {
+            margin-bottom: 20px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .navigation {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 200px;
+        }
+
+        .nav-link {
+            display: block;
+            padding: 8px 0;
+            color: #1976d2;
+            text-decoration: none;
+            border-bottom: 1px solid #eee;
+        }
+
+        .nav-link:hover {
+            color: #01579b;
+            text-decoration: underline;
+        }
+
+        .nav-link:last-child {
+            border-bottom: none;
+        }
+
+        .code-toggle {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .mermaid-code {
+            display: none;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+
+        .download-btn {
+            background: #1976d2;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin: 10px 5px 10px 0;
+        }
+
+        .download-btn:hover {
+            background: #01579b;
+        }
+
+        @media print {
+            .navigation, .code-toggle, .download-btn {
+                display: none;
+            }
+            .diagram-container {
+                break-inside: avoid;
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 Voxtral ASR Fine-tuning</h1>
+        <h2>Architecture & Workflow Diagrams</h2>
+        <p>Interactive documentation with Mermaid diagrams</p>
+    </div>
+
+    <nav class="navigation">
+        <strong>Quick Navigation</strong>
+        <a href="#overview" class="nav-link">Overview</a>
+        <a href="#architecture" class="nav-link">Architecture</a>
+        <a href="#interface" class="nav-link">Interface Workflow</a>
+        <a href="#training" class="nav-link">Training Pipeline</a>
+        <a href="#deployment" class="nav-link">Deployment Pipeline</a>
+        <a href="#dataflow" class="nav-link">Data Flow</a>
+    </nav>
+
+    <div id="overview" class="diagram-container">
+        <div class="diagram-title">📋 Documentation Overview</div>
+        <div class="diagram-description">
+            High-level overview of the Voxtral ASR Fine-tuning application and its documentation structure.
+        </div>
+        <div class="mermaid">
+graph TD
+    START(["Voxtral ASR Fine-tuning App"]) --> OVERVIEW{Choose Documentation}
+
+    OVERVIEW --> ARCH["Architecture Overview"]
+    OVERVIEW --> WORKFLOW["Interface Workflow"]
+    OVERVIEW --> TRAINING["Training Pipeline"]
+    OVERVIEW --> DEPLOYMENT["Deployment Pipeline"]
+    OVERVIEW --> DATAFLOW["Data Flow"]
+
+    ARCH --> ARCH_DIAG["High-level Architecture<br/>System Components & Layers"]
+    WORKFLOW --> WORKFLOW_DIAG["User Journey<br/>Recording → Training → Demo"]
+    TRAINING --> TRAINING_DIAG["Training Scripts<br/>Data → Model → Results"]
+    DEPLOYMENT --> DEPLOYMENT_DIAG["Publishing & Demo<br/>Model → Hub → Space"]
+    DATAFLOW --> DATAFLOW_DIAG["Complete Data Journey<br/>Input → Processing → Output"]
+
+    subgraph "Core Components"
+        INTERFACE["interface.py<br/>Gradio Web UI"]
+        TRAIN_SCRIPTS["scripts/train*.py<br/>Training Scripts"]
+        DEPLOY_SCRIPT["scripts/deploy_demo_space.py<br/>Demo Deployment"]
+        PUSH_SCRIPT["scripts/push_to_huggingface.py<br/>Model Publishing"]
+    end
+
+    subgraph "Key Data Formats"
+        JSONL["JSONL Dataset<br/>{'audio_path': '...', 'text': '...'}"]
+        HFDATA["HF Hub Models<br/>username/model-name"]
+        SPACES["HF Spaces<br/>Interactive Demos"]
+    end
+
+    INTERFACE --> WORKFLOW
+    TRAIN_SCRIPTS --> TRAINING
+    DEPLOY_SCRIPT --> DEPLOYMENT
+    PUSH_SCRIPT --> DEPLOYMENT
+
+    JSONL --> DATAFLOW
+    HFDATA --> DEPLOYMENT
+    SPACES --> DEPLOYMENT
+
+    classDef entry fill:#e3f2fd,stroke:#1976d2,stroke-width:3px
+    classDef category fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef diagram fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef component fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef data fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+
+    class START entry
+    class OVERVIEW,ARCH,WORKFLOW,TRAINING,DEPLOYMENT,DATAFLOW category
+    class ARCH_DIAG,WORKFLOW_DIAG,TRAINING_DIAG,DEPLOYMENT_DIAG,DATAFLOW_DIAG diagram
+    class INTERFACE,TRAIN_SCRIPTS,DEPLOY_SCRIPT,PUSH_SCRIPT component
+    class JSONL,HFDATA,SPACES data
+        </div>
+    </div>
+
+    <div id="architecture" class="diagram-container">
+        <div class="diagram-title">System Architecture</div>
+        <div class="diagram-description">
+            High-level architecture showing the main components and their relationships in the Voxtral ASR Fine-tuning application.
+        </div>
+        <div class="mermaid">
+graph TB
+    subgraph "User Interface"
+        UI["Gradio Web Interface<br/>interface.py"]
+        REC["Audio Recording<br/>Microphone Input"]
+        UP["File Upload<br/>WAV/FLAC files"]
+    end
+
+    subgraph "Data Processing"
+        DP["Data Processing<br/>Audio resampling<br/>JSONL creation"]
+        DS["Dataset Management<br/>NVIDIA Granary<br/>Local datasets"]
+    end
+
+    subgraph "Training Pipeline"
+        TF["Full Fine-tuning<br/>scripts/train.py"]
+        TL["LoRA Fine-tuning<br/>scripts/train_lora.py"]
+        TI["Trackio Integration<br/>Experiment Tracking"]
+    end
+
+    subgraph "Model Management"
+        MM["Model Management<br/>Hugging Face Hub<br/>Local storage"]
+        MC["Model Card Generation<br/>scripts/generate_model_card.py"]
+    end
+
+    subgraph "Deployment &amp; Demo"
+        DEP["Demo Space Deployment<br/>scripts/deploy_demo_space.py"]
+        HF["HF Spaces<br/>Interactive Demo"]
+    end
+
+    subgraph "External Services"
+        HFH["Hugging Face Hub<br/>Models & Datasets"]
+        GRAN["NVIDIA Granary<br/>Multilingual ASR Dataset"]
+        TRACK["Trackio Spaces<br/>Experiment Tracking"]
+    end
+
+    UI --> DP
+    REC --> DP
+    UP --> DP
+    DP --> DS
+
+    DS --> TF
+    DS --> TL
+    TF --> TI
+    TL --> TI
+
+    TF --> MM
+    TL --> MM
+    MM --> MC
+
+    MM --> DEP
+    DEP --> HF
+
+    DS -.-> HFH
+    MM -.-> HFH
+    TI -.-> TRACK
+    DS -.-> GRAN
+
+    classDef interface fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef processing fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef training fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef management fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef deployment fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef external fill:#f5f5f5,stroke:#424242,stroke-width:2px
+
+    class UI,REC,UP interface
+    class DP,DS processing
+    class TF,TL,TI training
+    class MM,MC management
+    class DEP,HF deployment
+    class HFH,GRAN,TRACK external
+        </div>
+    </div>
+
+    <div id="interface" class="diagram-container">
+        <div class="diagram-title">Interface Workflow</div>
+        <div class="diagram-description">
+            Complete user journey through the Voxtral ASR Fine-tuning interface, from language selection to demo deployment.
+        </div>
+        <div class="mermaid">
+flowchart TD
+    START(["User Opens Interface"]) --> LANG["Language Selection<br/>Choose from 25+ languages"]
+    LANG --> PHRASES["Load Phrases<br/>From NVIDIA Granary"]
+    PHRASES --> RECORD["Recording Interface<br/>Display phrases + audio recording"]
+
+    RECORD --> |User Records| PROCESS_REC["Process Recordings<br/>Save WAV files + transcripts"]
+    RECORD --> |Upload Files| PROCESS_UPLOAD["Process Uploads<br/>Handle existing files + transcripts"]
+
+    PROCESS_REC --> JSONL["Create JSONL Dataset<br/>{'audio_path': '...', 'text': '...'}"]
+    PROCESS_UPLOAD --> JSONL
+
+    JSONL --> CONFIG["Training Configuration<br/>Model, LoRA/full, hyperparameters"]
+    CONFIG --> TRAIN["Training Process<br/>Execute train.py or train_lora.py"]
+
+    TRAIN --> PUSH["Push to Hub<br/>Model + metadata to HF Hub"]
+    TRAIN --> CARD["Generate Model Card<br/>Automated documentation"]
+    PUSH --> DEPLOY["Deploy Demo Space<br/>Interactive demo on HF Spaces"]
+
+    DEPLOY --> END(["Demo Ready<br/>Interactive ASR Demo"])
+
+    PUSH -.-> END
+    CARD -.-> END
+
+    classDef start fill:#e3f2fd,stroke:#1976d2,stroke-width:3px
+    classDef process fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef terminal fill:#e8f5e8,stroke:#388e3c,stroke-width:3px
+
+    class START start
+    class END terminal
+    class LANG,PHRASES,RECORD,PROCESS_REC,PROCESS_UPLOAD,JSONL,CONFIG,TRAIN,PUSH,CARD,DEPLOY process
+        </div>
+    </div>
+
+    <div id="training" class="diagram-container">
+        <div class="diagram-title">Training Pipeline</div>
+        <div class="diagram-description">
+            Detailed training pipeline showing how data flows through training scripts and supporting infrastructure.
+        </div>
+        <div class="mermaid">
+graph TB
+    subgraph "Data Sources"
+        JSONL["JSONL Dataset<br/>{'audio_path': '...', 'text': '...'}"]
+        GRANARY["NVIDIA Granary Dataset<br/>Multilingual ASR Data"]
+        HFDATA["HF Hub Datasets<br/>Community Datasets"]
+    end
+
+    subgraph "Data Processing"
+        LOADER["Dataset Loader<br/>_load_jsonl_dataset()"]
+        CASTER["Audio Casting<br/>16kHz resampling"]
+        COLLATOR["VoxtralDataCollator<br/>Audio + Text Processing"]
+    end
+
+    subgraph "Training Scripts"
+        TRAIN_FULL["Full Fine-tuning<br/>scripts/train.py"]
+        TRAIN_LORA["LoRA Fine-tuning<br/>scripts/train_lora.py"]
+
+        subgraph "Training Components"
+            MODEL_INIT["Model Initialization<br/>VoxtralForConditionalGeneration"]
+            LORA_CONFIG["LoRA Configuration<br/>LoraConfig + get_peft_model"]
+            PROCESSOR_INIT["Processor Initialization<br/>VoxtralProcessor"]
+        end
+    end
+
+    subgraph "Training Infrastructure"
+        TRACKIO_INIT["Trackio Integration<br/>Experiment Tracking"]
+        HF_TRAINER["Hugging Face Trainer<br/>TrainingArguments + Trainer"]
+        TORCH_DEVICE["Torch Device Setup<br/>GPU/CPU Detection"]
+    end
+
+    subgraph "Training Process"
+        FORWARD_PASS["Forward Pass<br/>Audio Processing + Generation"]
+        LOSS_CALC["Loss Calculation<br/>Masked Language Modeling"]
+        BACKWARD_PASS["Backward Pass<br/>Gradient Computation"]
+        OPTIMIZER_STEP["Optimizer Step<br/>Parameter Updates"]
+        LOGGING["Metrics Logging<br/>Loss, Perplexity, etc."]
+    end
+
+    subgraph "Model Management"
+        CHECKPOINT_SAVING["Checkpoint Saving<br/>Model snapshots"]
+        MODEL_SAVING["Final Model Saving<br/>Processor + Model"]
+        LOCAL_STORAGE["Local Storage<br/>outputs/ directory"]
+    end
+
+    LOADER --> CASTER
+    CASTER --> COLLATOR
+
+    COLLATOR --> TRAIN_FULL
+    COLLATOR --> TRAIN_LORA
+
+    TRAIN_FULL --> MODEL_INIT
+    TRAIN_LORA --> MODEL_INIT
+    TRAIN_LORA --> LORA_CONFIG
+
+    MODEL_INIT --> PROCESSOR_INIT
+    LORA_CONFIG --> PROCESSOR_INIT
+
+    PROCESSOR_INIT --> TRACKIO_INIT
+    PROCESSOR_INIT --> HF_TRAINER
+    PROCESSOR_INIT --> TORCH_DEVICE
+
+    TRACKIO_INIT --> HF_TRAINER
+    TORCH_DEVICE --> HF_TRAINER
+
+    HF_TRAINER --> FORWARD_PASS
+    FORWARD_PASS --> LOSS_CALC
+    LOSS_CALC --> BACKWARD_PASS
+    BACKWARD_PASS --> OPTIMIZER_STEP
+    OPTIMIZER_STEP --> LOGGING
+
+    LOGGING --> CHECKPOINT_SAVING
+    LOGGING --> TRACKIO_INIT
+
+    HF_TRAINER --> MODEL_SAVING
+    MODEL_SAVING --> LOCAL_STORAGE
+
+    JSONL --> LOADER
+    GRANARY --> LOADER
+    HFDATA --> LOADER
+
+    classDef input fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef processing fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef training fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef infrastructure fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef execution fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef output fill:#f5f5f5,stroke:#424242,stroke-width:2px
+
+    class JSONL,GRANARY,HFDATA input
+    class LOADER,CASTER,COLLATOR processing
+    class TRAIN_FULL,TRAIN_LORA,MODEL_INIT,LORA_CONFIG,PROCESSOR_INIT training
+    class TRACKIO_INIT,HF_TRAINER,TORCH_DEVICE infrastructure
+    class FORWARD_PASS,LOSS_CALC,BACKWARD_PASS,OPTIMIZER_STEP,LOGGING execution
+    class CHECKPOINT_SAVING,MODEL_SAVING,LOCAL_STORAGE output
+        </div>
+    </div>
+
+    <div id="deployment" class="diagram-container">
+        <div class="diagram-title">Deployment Pipeline</div>
+        <div class="diagram-description">
+            Model publishing and demo deployment process from trained model to live interactive demo.
+        </div>
+        <div class="mermaid">
+graph TB
+    subgraph "Inputs"
+        TRAINED_MODEL["Trained Model<br/>Local directory"]
+        TRAINING_CONFIG["Training Config<br/>JSON/YAML"]
+        TRAINING_RESULTS["Training Results<br/>Metrics & logs"]
+        MODEL_METADATA["Model Metadata<br/>Name, description, etc."]
+    end
+
+    subgraph "Model Publishing"
+        PUSH_SCRIPT["push_to_huggingface.py<br/>Model Publisher"]
+
+        subgraph "Publishing Steps"
+            REPO_CREATION["Repository Creation<br/>HF Hub API"]
+            FILE_UPLOAD["File Upload<br/>Model files to HF"]
+            METADATA_UPLOAD["Metadata Upload<br/>Config & results"]
+        end
+    end
+
+    subgraph "Model Card Generation"
+        CARD_SCRIPT["generate_model_card.py<br/>Card Generator"]
+
+        subgraph "Card Components"
+            TEMPLATE_LOAD["Template Loading<br/>model_card.md"]
+            VARIABLE_REPLACEMENT["Variable Replacement<br/>Config injection"]
+            CONDITIONAL_PROCESSING["Conditional Sections<br/>Quantized models, etc."]
+        end
+    end
+
+    subgraph "Demo Space Deployment"
+        DEPLOY_SCRIPT["deploy_demo_space.py<br/>Space Deployer"]
+
+        subgraph "Space Setup"
+            SPACE_CREATION["Space Repository<br/>Create HF Space"]
+            TEMPLATE_COPY["Template Copying<br/>demo_voxtral/ files"]
+            ENV_INJECTION["Environment Setup<br/>Model config injection"]
+            SECRET_SETUP["Secret Configuration<br/>HF_TOKEN, model vars"]
+        end
+    end
+
+    subgraph "Space Building"
+        BUILD_TRIGGER[Build Trigger<br/>Automatic build start]
+        DEPENDENCY_INSTALL[Dependency Installation<br/>requirements.txt]
+        MODEL_DOWNLOAD[Model Download<br/>From HF Hub]
+        APP_INITIALIZATION[App Initialization<br/>Gradio app setup]
+    end
+
+    subgraph "Live Demo Space"
+        GRADIO_INTERFACE[Gradio Interface<br/>Interactive demo]
+        MODEL_INFERENCE[Model Inference<br/>Real-time ASR]
+        USER_INTERACTION[User Interaction<br/>Audio upload/playback]
+    end
+
+    subgraph "External Services"
+        HF_HUB[Hugging Face Hub<br/>Model & Space hosting]
+        HF_SPACES[HF Spaces Platform<br/>Demo hosting]
+    end
+
+    TRAINED_MODEL --> PUSH_SCRIPT
+    TRAINING_CONFIG --> PUSH_SCRIPT
+    TRAINING_RESULTS --> PUSH_SCRIPT
+    MODEL_METADATA --> PUSH_SCRIPT
+
+    PUSH_SCRIPT --> REPO_CREATION
+    REPO_CREATION --> FILE_UPLOAD
+    FILE_UPLOAD --> METADATA_UPLOAD
+
+    METADATA_UPLOAD --> CARD_SCRIPT
+    TRAINING_CONFIG --> CARD_SCRIPT
+    TRAINING_RESULTS --> CARD_SCRIPT
+
+    CARD_SCRIPT --> TEMPLATE_LOAD
+    TEMPLATE_LOAD --> VARIABLE_REPLACEMENT
+    VARIABLE_REPLACEMENT --> CONDITIONAL_PROCESSING
+
+    CONDITIONAL_PROCESSING --> DEPLOY_SCRIPT
+    METADATA_UPLOAD --> DEPLOY_SCRIPT
+
+    DEPLOY_SCRIPT --> SPACE_CREATION
+    SPACE_CREATION --> TEMPLATE_COPY
+    TEMPLATE_COPY --> ENV_INJECTION
+    ENV_INJECTION --> SECRET_SETUP
+
+    SECRET_SETUP --> BUILD_TRIGGER
+    BUILD_TRIGGER --> DEPENDENCY_INSTALL
+    DEPENDENCY_INSTALL --> MODEL_DOWNLOAD
+    MODEL_DOWNLOAD --> APP_INITIALIZATION
+
+    APP_INITIALIZATION --> GRADIO_INTERFACE
+    GRADIO_INTERFACE --> MODEL_INFERENCE
+    MODEL_INFERENCE --> USER_INTERACTION
+
+    HF_HUB --> MODEL_DOWNLOAD
+    HF_SPACES --> GRADIO_INTERFACE
+
+    classDef input fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef publishing fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef generation fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef deployment fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef building fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef demo fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef external fill:#f5f5f5,stroke:#424242,stroke-width:2px
+
+    class TRAINED_MODEL,TRAINING_CONFIG,TRAINING_RESULTS,MODEL_METADATA input
+    class PUSH_SCRIPT,REPO_CREATION,FILE_UPLOAD,METADATA_UPLOAD publishing
+    class CARD_SCRIPT,TEMPLATE_LOAD,VARIABLE_REPLACEMENT,CONDITIONAL_PROCESSING generation
+    class DEPLOY_SCRIPT,SPACE_CREATION,TEMPLATE_COPY,ENV_INJECTION,SECRET_SETUP deployment
+    class BUILD_TRIGGER,DEPENDENCY_INSTALL,MODEL_DOWNLOAD,APP_INITIALIZATION building
+    class GRADIO_INTERFACE,MODEL_INFERENCE,USER_INTERACTION demo
+    class HF_HUB,HF_SPACES external
+        </div>
+    </div>
+
+    <div id="dataflow" class="diagram-container">
+        <div class="diagram-title">Data Flow</div>
+        <div class="diagram-description">
+            Complete data journey through the Voxtral ASR Fine-tuning application from user input to deployed demo.
+        </div>
+        <div class="mermaid">
+flowchart TD
+    subgraph "User Input"
+        MIC["Microphone Recording<br/>Raw audio + timestamps"]
+        FILE["File Upload<br/>WAV/FLAC files"]
+        TEXT["Manual Transcripts<br/>Text input"]
+        LANG["Language Selection<br/>25+ languages"]
+    end
+
+    subgraph "Data Processing"
+        AUDIO_PROC["Audio Processing<br/>Resampling to 16kHz<br/>Format conversion"]
+        TEXT_PROC["Text Processing<br/>Transcript validation<br/>Cleaning & formatting"]
+        JSONL_CONV["JSONL Conversion<br/>{'audio_path': '...', 'text': '...'}"]
+    end
+
+    subgraph "Dataset Storage"
+        LOCAL_DS["Local Dataset<br/>datasets/voxtral_user/<br/>data.jsonl + wavs/"]
+        HF_DS["HF Hub Dataset<br/>username/dataset-name<br/>Public sharing"]
+    end
+
+    subgraph "Training Data Pipeline"
+        DS_LOADER["Dataset Loader<br/>_load_jsonl_dataset()<br/>or load_dataset()"]
+        AUDIO_CAST["Audio Casting<br/>Audio(sampling_rate=16000)"]
+        TRAIN_SPLIT["Train Split<br/>train_dataset"]
+        EVAL_SPLIT["Eval Split<br/>eval_dataset"]
+    end
+
+    subgraph "Model Training"
+        COLLATOR["VoxtralDataCollator<br/>Audio + Text batching<br/>Prompt construction"]
+        FORWARD["Forward Pass<br/>Audio → Features → Text"]
+        LOSS["Loss Calculation<br/>Masked LM loss"]
+        BACKWARD["Backward Pass<br/>Gradient computation"]
+        OPTIMIZE["Parameter Updates<br/>LoRA or full fine-tuning"]
+    end
+
+    subgraph "Training Outputs"
+        MODEL_FILES["Model Files<br/>model.safetensors<br/>config.json<br/>tokenizer.json"]
+        TRAINING_LOGS["Training Logs<br/>train_results.json<br/>training_config.json<br/>loss curves"]
+        CHECKPOINTS["Checkpoints<br/>Intermediate models<br/>best model tracking"]
+    end
+
+    subgraph "Publishing Pipeline"
+        HF_REPO["HF Repository<br/>username/model-name<br/>Model hosting"]
+        MODEL_CARD["Model Card<br/>README.md<br/>Training details<br/>Usage examples"]
+        METADATA["Training Metadata<br/>Config + results<br/>Performance metrics"]
+    end
+
+    subgraph "Demo Deployment"
+        SPACE_REPO["HF Space Repository<br/>username/model-name-demo<br/>Demo hosting"]
+        DEMO_APP["Demo Application<br/>Gradio interface<br/>Real-time inference"]
+        ENV_VARS["Environment Config<br/>HF_MODEL_ID<br/>MODEL_NAME<br/>secrets"]
+    end
+
+    MIC --> AUDIO_PROC
+    FILE --> AUDIO_PROC
+    TEXT --> TEXT_PROC
+    LANG --> TEXT_PROC
+
+    AUDIO_PROC --> JSONL_CONV
+    TEXT_PROC --> JSONL_CONV
+
+    JSONL_CONV --> LOCAL_DS
+    LOCAL_DS --> HF_DS
+
+    LOCAL_DS --> DS_LOADER
+    HF_DS --> DS_LOADER
+
+    DS_LOADER --> AUDIO_CAST
+    AUDIO_CAST --> TRAIN_SPLIT
+    AUDIO_CAST --> EVAL_SPLIT
+
+    TRAIN_SPLIT --> COLLATOR
+    EVAL_SPLIT --> COLLATOR
+
+    COLLATOR --> FORWARD
+    FORWARD --> LOSS
+    LOSS --> BACKWARD
+    BACKWARD --> OPTIMIZE
+
+    OPTIMIZE --> MODEL_FILES
+    OPTIMIZE --> TRAINING_LOGS
+    OPTIMIZE --> CHECKPOINTS
+
+    MODEL_FILES --> HF_REPO
+    TRAINING_LOGS --> HF_REPO
+    CHECKPOINTS --> HF_REPO
+
+    HF_REPO --> MODEL_CARD
+    TRAINING_LOGS --> MODEL_CARD
+
+    MODEL_CARD --> SPACE_REPO
+    HF_REPO --> SPACE_REPO
+    ENV_VARS --> SPACE_REPO
+
+    SPACE_REPO --> DEMO_APP
+
+    classDef input fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef processing fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef storage fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef training fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef output fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef publishing fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef deployment fill:#f5f5f5,stroke:#424242,stroke-width:2px
+
+    class MIC,FILE,TEXT,LANG input
+    class AUDIO_PROC,TEXT_PROC,JSONL_CONV processing
+    class LOCAL_DS,HF_DS storage
+    class DS_LOADER,AUDIO_CAST,TRAIN_SPLIT,EVAL_SPLIT,COLLATOR,FORWARD,LOSS,BACKWARD,OPTIMIZE training
+    class MODEL_FILES,TRAINING_LOGS,CHECKPOINTS output
+    class HF_REPO,MODEL_CARD,METADATA publishing
+    class SPACE_REPO,DEMO_APP,ENV_VARS deployment
+        </div>
+    </div>
+
+    <script>
+        // Toggle mermaid code visibility
+        function toggleCode(diagramId) {
+            const codeBlock = document.querySelector(`#${diagramId} .mermaid-code`);
+            if (codeBlock.style.display === 'none' || codeBlock.style.display === '') {
+                codeBlock.style.display = 'block';
+            } else {
+                codeBlock.style.display = 'none';
+            }
+        }
+
+        // Add toggle buttons to each diagram
+        document.addEventListener('DOMContentLoaded', function() {
+            const diagrams = document.querySelectorAll('.diagram-container');
+            diagrams.forEach((diagram, index) => {
+                const diagramId = diagram.id;
+                const mermaidDiv = diagram.querySelector('.mermaid');
+
+                if (mermaidDiv) {
+                    // Create toggle button
+                    const toggleBtn = document.createElement('button');
+                    toggleBtn.className = 'code-toggle';
+                    toggleBtn.textContent = '🔍 Show Mermaid Code';
+                    toggleBtn.onclick = () => toggleCode(diagramId);
+
+                    // Create code block
+                    const codeBlock = document.createElement('pre');
+                    codeBlock.className = 'mermaid-code';
+                    codeBlock.textContent = mermaidDiv.textContent.trim();
+
+                    // Insert elements
+                    mermaidDiv.parentNode.insertBefore(toggleBtn, mermaidDiv);
+                    mermaidDiv.parentNode.insertBefore(codeBlock, mermaidDiv.nextSibling);
+                }
+            });
+        });
+
+        // Print functionality
+        function printDiagrams() {
+            window.print();
+        }
+    </script>
+</body>
+</html>
