@@ -1,6 +1,6 @@
 ---
 title: VoxFactory
-emoji: 📚
+emoji: 🌬️
 colorFrom: gray
 colorTo: red
 sdk: gradio

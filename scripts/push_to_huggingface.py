@@ -502,11 +502,11 @@ MIT License
         return True
 
     def push_dataset(self, dataset_path: str, dataset_repo_name: str) -> bool:
-        """Push dataset to Hugging Face Hub"""
+        """Push dataset to Hugging Face Hub including audio files"""
         logger.info(f"🚀 Starting dataset push to {dataset_repo_name}")
 
         try:
-            from huggingface_hub import create_repo
+            from huggingface_hub import create_repo, upload_file
             import json
 
             # Determine full dataset repo name
@@ -529,15 +529,44 @@ MIT License
                 logger.error(f"❌ Dataset file not found: {dataset_path}")
                 return False
 
-            # Count lines for metadata
+            # Read and process the JSONL to collect audio files and update paths
+            audio_files = []
+            updated_rows = []
+            total_audio_size = 0
+
             with open(dataset_file, 'r', encoding='utf-8') as f:
-                num_examples = sum(1 for _ in f)
+                for line_num, line in enumerate(f):
+                    try:
+                        row = json.loads(line.strip())
+                        audio_path = row.get("audio_path", "")
 
-            file_size = dataset_file.stat().st_size
+                        if audio_path:
+                            audio_file = Path(audio_path)
+                            if audio_file.exists():
+                                # Store the original file for upload
+                                audio_files.append(audio_file)
+                                total_audio_size += audio_file.stat().st_size
 
-            # Upload the dataset file
+                                # Update path to be relative for the dataset
+                                row["audio_path"] = f"audio/{audio_file.name}"
+                            else:
+                                logger.warning(f"Audio file not found: {audio_path}")
+                                row["audio_path"] = ""  # Clear missing files
+
+                        updated_rows.append(row)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid JSON on line {line_num + 1}: {e}")
+                        continue
+
+            # Create updated JSONL with relative paths
+            temp_jsonl_path = dataset_file.parent / "temp_data.jsonl"
+            with open(temp_jsonl_path, "w", encoding="utf-8") as f:
+                for row in updated_rows:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+            # Upload the updated JSONL file
             upload_file(
-                path_or_fileobj=str(dataset_file),
+                path_or_fileobj=str(temp_jsonl_path),
                 path_in_repo="data.jsonl",
                 repo_id=dataset_repo_name,
                 repo_type="dataset",
@@ -545,7 +574,30 @@ MIT License
             )
             logger.info(f"✅ Uploaded dataset file: {dataset_file.name}")
 
-            # Create a dataset README
+            # Clean up temp file
+            temp_jsonl_path.unlink()
+
+            # Upload audio files
+            uploaded_count = 0
+            for audio_file in audio_files:
+                try:
+                    remote_path = f"audio/{audio_file.name}"
+                    upload_file(
+                        path_or_fileobj=str(audio_file),
+                        path_in_repo=remote_path,
+                        repo_id=dataset_repo_name,
+                        repo_type="dataset",
+                        token=self.token
+                    )
+                    uploaded_count += 1
+                    logger.info(f"✅ Uploaded audio file: {audio_file.name}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to upload {audio_file.name}: {e}")
+
+            # Calculate total dataset size
+            total_dataset_size = dataset_file.stat().st_size + total_audio_size
+
+            # Create a comprehensive dataset README
             readme_content = f"""---
 dataset_info:
   features:
@@ -555,18 +607,17 @@ dataset_info:
       dtype: string
   splits:
     - name: train
-      num_bytes: {file_size}
-      num_examples: {num_examples}
-  download_size: {file_size}
-  dataset_size: {file_size}
+      num_bytes: {dataset_file.stat().st_size}
+      num_examples: {len(updated_rows)}
+  download_size: {total_dataset_size}
+  dataset_size: {total_dataset_size}
 tags:
 - voxtral
 - asr
-- fine-tuning
-- conversational
 - speech-to-text
-- audio-to-text
-- tonic 
+- fine-tuning
+- audio-dataset
+- tonic
 ---
 
 # Voxtral ASR Dataset
@@ -575,21 +626,53 @@ This dataset was created for fine-tuning Voxtral ASR models.
 
 ## Dataset Structure
 
-- **audio_path**: Path to the audio file
+- **audio_path**: Relative path to the audio file (stored in `audio/` directory)
 - **text**: Transcription of the audio
 
-## Statistics
+## Dataset Statistics
 
-- Number of examples: {num_examples}
-- File size: {file_size} bytes
+- **Number of examples**: {len(updated_rows)}
+- **Audio files uploaded**: {uploaded_count}
+- **Total dataset size**: {total_dataset_size:,} bytes
 
 ## Usage
 
 ```python
-from datasets import load_dataset
+from datasets import load_dataset, Audio
 
+# Load dataset
 dataset = load_dataset("{dataset_repo_name}")
+
+# Load audio data
+dataset = dataset.cast_column("audio_path", Audio())
+
+# Access first example
+print(dataset[0]["text"])
+print(dataset[0]["audio_path"])
 ```
+
+## Loading with Audio Decoding
+
+```python
+from datasets import load_dataset, Audio
+
+# Load with automatic audio decoding
+dataset = load_dataset("{dataset_repo_name}")
+dataset = dataset.cast_column("audio_path", Audio(sampling_rate=16000))
+
+# The audio column will contain the decoded audio arrays
+audio_array = dataset[0]["audio_path"]["array"]
+sampling_rate = dataset[0]["audio_path"]["sampling_rate"]
+```
+
+## Dataset Features
+
+This dataset contains audio files with corresponding transcriptions for Voxtral ASR model fine-tuning.
+All audio files are stored in the `audio/` directory and referenced using relative paths in the dataset.
+
+## License
+
+This dataset is created for research and educational purposes.
 """
 
             # Upload README
@@ -609,13 +692,97 @@ dataset = load_dataset("{dataset_repo_name}")
 
             logger.info(f"✅ Dataset README uploaded")
             logger.info(f"🎉 Dataset successfully pushed to: https://huggingface.co/datasets/{dataset_repo_name}")
+            logger.info(f"📊 Uploaded {len(updated_rows)} examples and {uploaded_count} audio files")
 
             return True
 
         except Exception as e:
             logger.error(f"❌ Failed to push dataset: {e}")
             return False
-    
+
+    def test_dataset_push(self, dataset_path: str) -> bool:
+        """Test dataset validation without uploading to Hugging Face Hub"""
+        logger.info(f"🧪 Testing dataset validation for {dataset_path}")
+
+        try:
+            # Read the dataset file
+            dataset_file = Path(dataset_path)
+            if not dataset_file.exists():
+                logger.error(f"❌ Dataset file not found: {dataset_path}")
+                return False
+
+            # Read and process the JSONL to validate audio files
+            audio_files = []
+            updated_rows = []
+            total_audio_size = 0
+            missing_files = []
+            invalid_json_lines = []
+
+            with open(dataset_file, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f):
+                    try:
+                        row = json.loads(line.strip())
+                        audio_path = row.get("audio_path", "")
+
+                        if audio_path:
+                            audio_file = Path(audio_path)
+                            if audio_file.exists():
+                                # Store the file info for validation
+                                audio_files.append(audio_file)
+                                total_audio_size += audio_file.stat().st_size
+                            else:
+                                missing_files.append(str(audio_path))
+
+                        updated_rows.append(row)
+                    except json.JSONDecodeError as e:
+                        invalid_json_lines.append(f"Line {line_num + 1}: {e}")
+                        continue
+
+            # Report validation results
+            logger.info("📊 Dataset Validation Results:")
+            logger.info(f"   - Total examples: {len(updated_rows)}")
+            logger.info(f"   - Valid audio files: {len(audio_files)}")
+            logger.info(f"   - Total audio size: {total_audio_size:,} bytes")
+            logger.info(f"   - Missing audio files: {len(missing_files)}")
+            logger.info(f"   - Invalid JSON lines: {len(invalid_json_lines)}")
+
+            if missing_files:
+                logger.warning("⚠️ Missing audio files:")
+                for missing in missing_files[:5]:  # Show first 5
+                    logger.warning(f"   - {missing}")
+                if len(missing_files) > 5:
+                    logger.warning(f"   ... and {len(missing_files) - 5} more")
+
+            if invalid_json_lines:
+                logger.warning("⚠️ Invalid JSON lines:")
+                for invalid in invalid_json_lines[:3]:  # Show first 3
+                    logger.warning(f"   - {invalid}")
+                if len(invalid_json_lines) > 3:
+                    logger.warning(f"   ... and {len(invalid_json_lines) - 3} more")
+
+            # Show sample of how paths will be converted
+            if audio_files:
+                logger.info("🔄 Path conversion preview:")
+                for audio_file in audio_files[:3]:  # Show first 3
+                    logger.info(f"   - {str(audio_file)} → audio/{audio_file.name}")
+
+            # Overall validation status
+            if len(updated_rows) == 0:
+                logger.error("❌ No valid examples found in dataset")
+                return False
+
+            if len(missing_files) > 0:
+                logger.warning("⚠️ Some audio files are missing - they will be skipped during upload")
+            else:
+                logger.info("✅ All audio files found and valid")
+
+            logger.info("✅ Dataset validation completed successfully!")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to validate dataset: {e}")
+            return False
+
     def _load_training_config(self) -> Dict[str, Any]:
         """Load training configuration"""
         config_path = self.model_path / "training_config.json"
@@ -656,6 +823,7 @@ def parse_args():
     dataset_parser.add_argument('repo_name', type=str, help='Hugging Face dataset repository name')
     dataset_parser.add_argument('--token', type=str, default=None, help='Hugging Face token')
     dataset_parser.add_argument('--private', action='store_true', help='Make repository private')
+    dataset_parser.add_argument('--test', action='store_true', help='Test mode - validate dataset without uploading')
     
     return parser.parse_args()
 
@@ -710,15 +878,24 @@ def main():
                 private=args.private
             )
 
-            # Push dataset
-            success = pusher.push_dataset(args.dataset_path, args.repo_name)
-
-            if success:
-                logger.info("✅ Dataset push completed successfully!")
-                logger.info(f"📊 View your dataset at: https://huggingface.co/datasets/{args.repo_name}")
+            if getattr(args, 'test', False):
+                # Test mode - validate dataset without uploading
+                success = pusher.test_dataset_push(args.dataset_path)
+                if success:
+                    logger.info("✅ Dataset validation completed successfully!")
+                else:
+                    logger.error("❌ Dataset validation failed!")
+                    return 1
             else:
-                logger.error("❌ Dataset push failed!")
-                return 1
+                # Push dataset
+                success = pusher.push_dataset(args.dataset_path, args.repo_name)
+
+                if success:
+                    logger.info("✅ Dataset push completed successfully!")
+                    logger.info(f"📊 View your dataset at: https://huggingface.co/datasets/{args.repo_name}")
+                else:
+                    logger.error("❌ Dataset push failed!")
+                    return 1
 
     except Exception as e:
         logger.error(f"❌ Error during push: {e}")

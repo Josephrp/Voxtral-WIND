@@ -177,11 +177,12 @@ def _save_uploaded_dataset(files: list, transcripts: list[str]) -> str:
 
 
 def _push_dataset_to_hub(jsonl_path: str, repo_name: str, username: str = "") -> str:
-    """Push dataset to Hugging Face Hub"""
+    """Push dataset to Hugging Face Hub including audio files"""
     try:
         from huggingface_hub import HfApi, create_repo
         import json
         from pathlib import Path
+        import os
 
         token = os.getenv("HF_TOKEN") or os.getenv("HF_WRITE_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
 
@@ -210,16 +211,74 @@ def _push_dataset_to_hub(jsonl_path: str, repo_name: str, username: str = "") ->
         if not jsonl_file.exists():
             return f"❌ Dataset file not found: {jsonl_path}"
 
-        # Upload the JSONL file
+        # Read and process the JSONL to collect audio files and update paths
+        audio_files = []
+        updated_rows = []
+        total_audio_size = 0
+
+        with open(jsonl_file, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f):
+                try:
+                    row = json.loads(line.strip())
+                    audio_path = row.get("audio_path", "")
+
+                    if audio_path:
+                        audio_file = Path(audio_path)
+                        if audio_file.exists():
+                            # Store the original file for upload
+                            audio_files.append(audio_file)
+                            total_audio_size += audio_file.stat().st_size
+
+                            # Update path to be relative for the dataset
+                            row["audio_path"] = f"audio/{audio_file.name}"
+                        else:
+                            print(f"⚠️ Warning: Audio file not found: {audio_path}")
+                            row["audio_path"] = ""  # Clear missing files
+
+                    updated_rows.append(row)
+                except json.JSONDecodeError as e:
+                    print(f"⚠️ Warning: Invalid JSON on line {line_num + 1}: {e}")
+                    continue
+
+        # Create updated JSONL with relative paths
+        temp_jsonl_path = jsonl_file.parent / "temp_data.jsonl"
+        with open(temp_jsonl_path, "w", encoding="utf-8") as f:
+            for row in updated_rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        # Upload the updated JSONL file
         api.upload_file(
-            path_or_fileobj=str(jsonl_file),
+            path_or_fileobj=str(temp_jsonl_path),
             path_in_repo="data.jsonl",
             repo_id=repo_name,
             repo_type="dataset",
             token=token
         )
 
-        # Create a simple README for the dataset
+        # Clean up temp file
+        temp_jsonl_path.unlink()
+
+        # Upload audio files
+        uploaded_count = 0
+        for audio_file in audio_files:
+            try:
+                remote_path = f"audio/{audio_file.name}"
+                api.upload_file(
+                    path_or_fileobj=str(audio_file),
+                    path_in_repo=remote_path,
+                    repo_id=repo_name,
+                    repo_type="dataset",
+                    token=token
+                )
+                uploaded_count += 1
+                print(f"✅ Uploaded audio file: {audio_file.name}")
+            except Exception as e:
+                print(f"❌ Failed to upload {audio_file.name}: {e}")
+
+        # Calculate total dataset size
+        total_dataset_size = jsonl_file.stat().st_size + total_audio_size
+
+        # Create README for the dataset
         readme_content = f"""---
 dataset_info:
   features:
@@ -230,9 +289,15 @@ dataset_info:
   splits:
     - name: train
       num_bytes: {jsonl_file.stat().st_size}
-      num_examples: {sum(1 for _ in open(jsonl_file))}
-  download_size: {jsonl_file.stat().st_size}
-  dataset_size: {jsonl_file.stat().st_size}
+      num_examples: {len(updated_rows)}
+  download_size: {total_dataset_size}
+  dataset_size: {total_dataset_size}
+tags:
+- voxtral
+- asr
+- speech-to-text
+- fine-tuning
+- audio-dataset
 ---
 
 # Voxtral ASR Dataset
@@ -241,15 +306,43 @@ This dataset was created using the Voxtral ASR Fine-tuning Interface.
 
 ## Dataset Structure
 
-- **audio_path**: Path to the audio file
+- **audio_path**: Relative path to the audio file (stored in `audio/` directory)
 - **text**: Transcription of the audio
+
+## Dataset Statistics
+
+- **Number of examples**: {len(updated_rows)}
+- **Audio files uploaded**: {uploaded_count}
+- **Total dataset size**: {total_dataset_size:,} bytes
 
 ## Usage
 
 ```python
-from datasets import load_dataset
+from datasets import load_dataset, Audio
 
+# Load dataset
 dataset = load_dataset("{repo_name}")
+
+# Load audio data
+dataset = dataset.cast_column("audio_path", Audio())
+
+# Access first example
+print(dataset[0]["text"])
+print(dataset[0]["audio_path"])
+```
+
+## Loading with Audio Decoding
+
+```python
+from datasets import load_dataset, Audio
+
+# Load with automatic audio decoding
+dataset = load_dataset("{repo_name}")
+dataset = dataset.cast_column("audio_path", Audio(sampling_rate=16000))
+
+# The audio column will contain the decoded audio arrays
+audio_array = dataset[0]["audio_path"]["array"]
+sampling_rate = dataset[0]["audio_path"]["sampling_rate"]
 ```
 """
 
@@ -268,7 +361,7 @@ dataset = load_dataset("{repo_name}")
 
         readme_path.unlink()  # Clean up temp file
 
-        return f"✅ Dataset pushed to: https://huggingface.co/datasets/{repo_name}"
+        return f"✅ Dataset pushed to: https://huggingface.co/datasets/{repo_name}\n📊 Uploaded {len(updated_rows)} examples and {uploaded_count} audio files"
 
     except Exception as e:
         return f"❌ Failed to push dataset: {e}"
