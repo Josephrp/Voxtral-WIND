@@ -745,15 +745,15 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
         def _collect_upload(files, txt):
             lines = [s.strip() for s in (txt or "").splitlines() if s.strip()]
             jsonl_path = _save_uploaded_dataset(files or [], lines)
-            return f"✅ Dataset saved locally: {jsonl_path}"
+            return str(jsonl_path), f"✅ Dataset saved locally: {jsonl_path}"
 
-        def _push_dataset_handler(repo_name):
-            if not jsonl_path_state.value:
+        def _push_dataset_handler(repo_name, current_jsonl_path):
+            if not current_jsonl_path:
                 return "❌ No dataset saved yet. Please save dataset first."
-            return _push_dataset_to_hub(jsonl_path_state.value, repo_name)
+            return _push_dataset_to_hub(current_jsonl_path, repo_name)
 
-        save_upload_btn.click(_collect_upload, [upload_audio, transcripts_box], [jsonl_path_state])
-        push_dataset_btn.click(_push_dataset_handler, [dataset_repo_name], [jsonl_path_state])
+        save_upload_btn.click(_collect_upload, [upload_audio, transcripts_box], [jsonl_path_state, dataset_status])
+        push_dataset_btn.click(_push_dataset_handler, [dataset_repo_name, jsonl_path_state], [dataset_status])
 
     # Save recordings button
     save_rec_btn = gr.Button("Save recordings as dataset", visible=False)
@@ -782,16 +782,16 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
             rows.append({"audio_path": str(out_path), "text": label_text})
         jsonl_path = dataset_dir / "data.jsonl"
         _write_jsonl(rows, jsonl_path)
-        return str(jsonl_path)
+        return str(jsonl_path), f"✅ Dataset saved locally: {jsonl_path}"
 
-    save_rec_btn.click(_collect_preloaded_recs, rec_components + [phrase_texts_state], [jsonl_path_state])
+    save_rec_btn.click(_collect_preloaded_recs, rec_components + [phrase_texts_state], [jsonl_path_state, dataset_status])
 
-    def _push_recordings_handler(repo_name):
-        if not jsonl_path_state.value:
+    def _push_recordings_handler(repo_name, current_jsonl_path):
+        if not current_jsonl_path:
             return "❌ No recordings dataset saved yet. Please save recordings first."
-        return _push_dataset_to_hub(jsonl_path_state.value, repo_name)
+        return _push_dataset_to_hub(current_jsonl_path, repo_name)
 
-    push_recordings_btn.click(_push_recordings_handler, [dataset_repo_name], [jsonl_path_state])
+    push_recordings_btn.click(_push_recordings_handler, [dataset_repo_name, jsonl_path_state], [dataset_status])
 
     # Removed multilingual dataset sample section - phrases are now loaded automatically when language is selected
 

@@ -5,12 +5,10 @@ language:
 license: apache-2.0
 library_name: transformers
 tags:
-- smollm3
+- voxtral
 - fine-tuned
-- causal-lm
 - text-generation
 - tonic
-- legml
 {{#if quantized_models}}- quantized{{/if}}
 pipeline_tag: text-generation
 base_model: {{base_model}}

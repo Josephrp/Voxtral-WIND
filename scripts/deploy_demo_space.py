@@ -25,10 +25,8 @@ except ImportError:
     HF_HUB_AVAILABLE = False
     print("Warning: huggingface_hub not available. Install with: pip install huggingface_hub")
 
-# Add src to path for imports
+# Add src to path for imports (kept for potential future imports)
 sys.path.append(str(Path(__file__).parent.parent / "src"))
-
-from config import SmolLM3Config
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -223,14 +221,9 @@ os.environ['BRAND_PROJECT_URL'] = {_json.dumps(self.brand_project_url)}
 
 """
         elif self.demo_type == "voxtral":
-            import json as _json
-            env_setup = f"""
-# Environment variables for Voxtral ASR demo
-import os
-os.environ['HF_MODEL_ID'] = {_json.dumps(self.model_id)}
-os.environ['MODEL_NAME'] = {_json.dumps(self.model_id.split('/')[-1])}
-os.environ['HF_USERNAME'] = {_json.dumps(self.hf_username)}
-"""
+            # For Voxtral, we do not inject env setup into app.py.
+            # Space variables are set via the API in set_space_secrets().
+            env_setup = ""
         else:
             # For SmolLM models, use simpler setup
             import json as _json
@@ -534,80 +527,80 @@ os.environ['BRAND_PROJECT_URL'] = {_json.dumps(self.brand_project_url)}
                     copied_files.append(file_path.name)
                     logger.info(f"✅ Copied {file_path.name} to temp directory")
             
-            # Update app.py with environment variables
+            # Update app.py with environment variables (skip for Voxtral)
             app_file = Path(temp_dir) / "app.py"
-            if app_file.exists():
+            if app_file.exists() and self.demo_type != "voxtral":
                 with open(app_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
-                # Add environment variable setup at the top
-                env_setup = self._generate_env_setup()
-                
-                # Insert after imports
-                lines = content.split('\n')
-                import_end = 0
-                for i, line in enumerate(lines):
-                    if line.startswith('import ') or line.startswith('from '):
-                        import_end = i + 1
-                    elif line.strip() == '' and import_end > 0:
-                        break
-                
-                lines.insert(import_end, env_setup)
-                content = '\n'.join(lines)
-                
-                with open(app_file, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                
-                logger.info("✅ Updated app.py with model configuration")
-            
-            # YAML front matter required by Hugging Face Spaces
-            yaml_front_matter = (
-                f"---\n"
-                f"title: {'GPT-OSS Demo' if self.demo_type == 'gpt' else 'SmolLM3 Demo'}\n"
-                f"emoji: {'🌟' if self.demo_type == 'gpt' else '💃🏻'}\n"
-                f"colorFrom: {'blue' if self.demo_type == 'gpt' else 'green'}\n"
-                f"colorTo: {'pink' if self.demo_type == 'gpt' else 'purple'}\n"
-                f"sdk: gradio\n"
-                f"sdk_version: 5.40.0\n"
-                f"app_file: app.py\n"
-                f"pinned: false\n"
-                f"short_description: Interactive demo for {self.model_id}\n"
-                + ("license: mit\n" if self.demo_type != 'gpt' else "") +
-                f"---\n\n"
-            )
 
-            # Create README.md for the space (include configuration details)
-            readme_content = (
-                yaml_front_matter
-                + f"# Demo: {self.model_id}\n\n"
-                + f"This is an interactive demo for the fine-tuned model {self.model_id}.\n\n"
-                + "## Features\n"
-                  "- Interactive chat interface\n"
-                  "- Customizable system & developer prompts\n"
-                  "- Advanced generation parameters\n"
-                  "- Thinking mode support\n\n"
-                + "## Model Information\n"
-                  f"- **Model ID**: {self.model_id}\n"
-                  f"- **Subfolder**: {self.subfolder if self.subfolder and self.subfolder.strip() else 'main'}\n"
-                  f"- **Deployed by**: {self.hf_username}\n"
-                  + ("- **Base Model**: openai/gpt-oss-20b\n" if self.demo_type == 'gpt' else "")
-                  + "\n"
-                + "## Configuration\n"
-                  "- **Model Identity**:\n\n"
-                  f"```\n{self.model_identity or 'Not set'}\n```\n\n"
-                  "- **System Message** (default):\n\n"
-                  f"```\n{(self.system_message or self.model_identity) or 'Not set'}\n```\n\n"
-                  "- **Developer Message** (default):\n\n"
-                  f"```\n{self.developer_message or 'Not set'}\n```\n\n"
-                  "These defaults come from the selected training configuration and can be adjusted in the UI when you run the demo.\n\n"
-                + "## Usage\n"
-                  "Simply start chatting with the model using the interface below!\n\n"
-                + "---\n"
-                  "*This demo was automatically deployed by the SmolFactory Fine-tuning Pipeline*\n"
-            )
+                env_setup = self._generate_env_setup()
+
+                if env_setup:
+                    # Insert after imports
+                    lines = content.split('\n')
+                    import_end = 0
+                    for i, line in enumerate(lines):
+                        if line.startswith('import ') or line.startswith('from '):
+                            import_end = i + 1
+                        elif line.strip() == '' and import_end > 0:
+                            break
+
+                    lines.insert(import_end, env_setup)
+                    content = '\n'.join(lines)
+
+                    with open(app_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+
+                    logger.info("✅ Updated app.py with model configuration")
             
-            with open(Path(temp_dir) / "README.md", 'w', encoding='utf-8') as f:
-                f.write(readme_content)
+            # For Voxtral keep the template README. For others, create a README with YAML front matter.
+            if self.demo_type != "voxtral":
+                yaml_front_matter = (
+                    f"---\n"
+                    f"title: {'GPT-OSS Demo' if self.demo_type == 'gpt' else 'SmolLM3 Demo'}\n"
+                    f"emoji: {'🌟' if self.demo_type == 'gpt' else '💃🏻'}\n"
+                    f"colorFrom: {'blue' if self.demo_type == 'gpt' else 'green'}\n"
+                    f"colorTo: {'pink' if self.demo_type == 'gpt' else 'purple'}\n"
+                    f"sdk: gradio\n"
+                    f"sdk_version: 5.40.0\n"
+                    f"app_file: app.py\n"
+                    f"pinned: false\n"
+                    f"short_description: Interactive demo for {self.model_id}\n"
+                    + ("license: mit\n" if self.demo_type != 'gpt' else "") +
+                    f"---\n\n"
+                )
+
+                readme_content = (
+                    yaml_front_matter
+                    + f"# Demo: {self.model_id}\n\n"
+                    + f"This is an interactive demo for the fine-tuned model {self.model_id}.\n\n"
+                    + "## Features\n"
+                      "- Interactive chat interface\n"
+                      "- Customizable system & developer prompts\n"
+                      "- Advanced generation parameters\n"
+                      "- Thinking mode support\n\n"
+                    + "## Model Information\n"
+                      f"- **Model ID**: {self.model_id}\n"
+                      f"- **Subfolder**: {self.subfolder if self.subfolder and self.subfolder.strip() else 'main'}\n"
+                      f"- **Deployed by**: {self.hf_username}\n"
+                      + ("- **Base Model**: openai/gpt-oss-20b\n" if self.demo_type == 'gpt' else "")
+                      + "\n"
+                    + "## Configuration\n"
+                      "- **Model Identity**:\n\n"
+                      f"```\n{self.model_identity or 'Not set'}\n```\n\n"
+                      "- **System Message** (default):\n\n"
+                      f"```\n{(self.system_message or self.model_identity) or 'Not set'}\n```\n\n"
+                      "- **Developer Message** (default):\n\n"
+                      f"```\n{self.developer_message or 'Not set'}\n```\n\n"
+                      "These defaults come from the selected training configuration and can be adjusted in the UI when you run the demo.\n\n"
+                    + "## Usage\n"
+                      "Simply start chatting with the model using the interface below!\n\n"
+                    + "---\n"
+                      "*This demo was automatically deployed by the SmolFactory Fine-tuning Pipeline*\n"
+                )
+
+                with open(Path(temp_dir) / "README.md", 'w', encoding='utf-8') as f:
+                    f.write(readme_content)
             
             logger.info(f"✅ Prepared {len(copied_files)} files in temporary directory")
             return temp_dir
@@ -874,7 +867,7 @@ def main():
     parser.add_argument("--model-id", required=True, help="Model ID to deploy demo for")
     parser.add_argument("--subfolder", default="int4", help="Model subfolder (default: int4)")
     parser.add_argument("--space-name", help="Custom space name (optional)")
-    parser.add_argument("--demo-type", choices=["smol", "gpt"], help="Demo type: 'smol' for SmolLM, 'gpt' for GPT-OSS (auto-detected if not specified)")
+    parser.add_argument("--demo-type", choices=["smol", "gpt", "voxtral"], help="Demo type: 'smol' for SmolLM, 'gpt' for GPT-OSS, 'voxtral' for Voxtral ASR (auto-detected if not specified)")
     parser.add_argument("--config-file", help="Path to the training config file to import context (system/developer/model_identity)")
     # Examples configuration
     parser.add_argument("--examples-type", choices=["general", "medical"], help="Examples pack to enable in the demo UI")

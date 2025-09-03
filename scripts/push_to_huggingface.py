@@ -69,6 +69,8 @@ class HuggingFacePusher:
         
         # Resolve the full repo id (username/repo) if user only provided repo name
         self.repo_id = self._resolve_repo_id(self.repo_name)
+        # Artifact type detection (full vs lora)
+        self.artifact_type: Optional[str] = None
 
         logger.info(f"Initialized HuggingFacePusher for {self.repo_id}")
 
@@ -133,37 +135,57 @@ class HuggingFacePusher:
             logger.error(f"❌ Failed to create repository: {e}")
             return False
     
+    def _detect_artifact_type(self) -> str:
+        """Detect whether output dir contains a full model or a LoRA adapter."""
+        # LoRA artifacts
+        lora_candidates = [
+            self.model_path / "adapter_config.json",
+            self.model_path / "adapter_model.safetensors",
+            self.model_path / "adapter_model.bin",
+        ]
+        if any(p.exists() for p in lora_candidates) and (self.model_path / "adapter_config.json").exists():
+            return "lora"
+
+        # Full model artifacts
+        full_candidates = [
+            self.model_path / "config.json",
+            self.model_path / "model.safetensors",
+            self.model_path / "model.safetensors.index.json",
+            self.model_path / "pytorch_model.bin",
+        ]
+        if any(p.exists() for p in full_candidates):
+            return "full"
+
+        return "unknown"
+
     def validate_model_path(self) -> bool:
-        """Validate that the model path contains required files"""
-        # Support both safetensors and pytorch formats
-        required_files = [
-            "config.json",
-            "tokenizer.json",
-            "tokenizer_config.json"
-        ]
-        
-        # Check for model files (either safetensors or pytorch)
-        model_files = [
-            "model.safetensors.index.json",  # Safetensors format
-            "pytorch_model.bin"  # PyTorch format
-        ]
-        
-        missing_files = []
-        for file in required_files:
-            if not (self.model_path / file).exists():
-                missing_files.append(file)
-        
-        # Check if at least one model file exists
-        model_file_exists = any((self.model_path / file).exists() for file in model_files)
-        if not model_file_exists:
-            missing_files.extend(model_files)
-        
-        if missing_files:
-            logger.error(f"❌ Missing required files: {missing_files}")
-            return False
-        
-        logger.info("✅ Model files validated")
-        return True
+        """Validate that the model path contains required files for Voxtral full or LoRA."""
+        self.artifact_type = self._detect_artifact_type()
+        if self.artifact_type == "lora":
+            required = [self.model_path / "adapter_config.json"]
+            if not all(p.exists() for p in required):
+                logger.error("❌ LoRA artifacts missing required files (adapter_config.json)")
+                return False
+            # At least one adapter weight
+            if not ((self.model_path / "adapter_model.safetensors").exists() or (self.model_path / "adapter_model.bin").exists()):
+                logger.error("❌ LoRA artifacts missing adapter weights (adapter_model.safetensors or adapter_model.bin)")
+                return False
+            logger.info("✅ Detected LoRA adapter artifacts")
+            return True
+
+        if self.artifact_type == "full":
+            # Relaxed set: require config.json and at least one model weights file
+            if not (self.model_path / "config.json").exists():
+                logger.error("❌ Missing config.json in model directory")
+                return False
+            if not ((self.model_path / "model.safetensors").exists() or (self.model_path / "model.safetensors.index.json").exists() or (self.model_path / "pytorch_model.bin").exists()):
+                logger.error("❌ Missing model weights file (model.safetensors or pytorch_model.bin)")
+                return False
+            logger.info("✅ Detected full model artifacts")
+            return True
+
+        logger.error("❌ Could not detect model artifacts (neither full model nor LoRA)")
+        return False
     
     def create_model_card(self, training_config: Dict[str, Any], results: Dict[str, Any]) -> str:
         """Create a comprehensive model card using the generate_model_card.py script"""
@@ -215,88 +237,48 @@ class HuggingFacePusher:
             return self._create_simple_model_card(training_config, results)
     
     def _create_simple_model_card(self, training_config: Dict[str, Any], results: Dict[str, Any]) -> str:
-        """Create a simple model card without complex YAML to avoid formatting issues"""
-        return f"""---
-language:
-- en
-- fr
-license: apache-2.0
-tags:
-- smollm3
-- fine-tuned
-- causal-lm
-- text-generation
-pipeline_tag: text-generation
-base_model: HuggingFaceTB/SmolLM3-3B
----
+        """Create a simple model card tailored for Voxtral ASR (supports full and LoRA)."""
+        tags = ["voxtral", "asr", "speech-to-text", "fine-tuning"]
+        if self.artifact_type == "lora":
+            tags.append("lora")
+        front_matter = {
+            "license": "apache-2.0",
+            "tags": tags,
+            "pipeline_tag": "automatic-speech-recognition",
+        }
+        fm_yaml = "---\n" + "\n".join([
+            "license: apache-2.0",
+            "tags:",
+        ]) + "\n" + "\n".join([f"- {t}" for t in tags]) + "\n" + "pipeline_tag: automatic-speech-recognition\n---\n\n"
+        model_title = self.repo_id.split('/')[-1]
+        body = [
+            f"# {model_title}",
+            "",
+            ("This repository contains a LoRA adapter for Voxtral ASR. "
+             "Merge the adapter with the base model or load via PEFT for inference." if self.artifact_type == "lora" else
+             "This repository contains a fine-tuned Voxtral ASR model."),
+            "",
+            "## Usage",
+            "",
+            ("```python\nfrom transformers import AutoProcessor\nfrom peft import PeftModel\nfrom transformers import AutoModelForSeq2SeqLM\n\nbase_model_id = 'mistralai/Voxtral-Mini-3B-2507'\nprocessor = AutoProcessor.from_pretrained(base_model_id)\nbase_model = AutoModelForSeq2SeqLM.from_pretrained(base_model_id)\nmodel = PeftModel.from_pretrained(base_model, '{self.repo_id}')\n```" if self.artifact_type == "lora" else
+             f"""```python
+from transformers import AutoProcessor, AutoModelForSeq2SeqLM
 
-# {self.repo_id.split('/')[-1]}
-
-This is a fine-tuned SmolLM3 model based on the HuggingFaceTB/SmolLM3-3B architecture.
-
-## Model Details
-
-- **Base Model**: HuggingFaceTB/SmolLM3-3B
-- **Fine-tuning Method**: Supervised Fine-tuning
-- **Training Date**: {datetime.now().strftime('%Y-%m-%d')}
-- **Model Size**: {self._get_model_size():.1f} GB
-- **Dataset Repository**: {self.dataset_repo}
-- **Hardware**: {self._get_hardware_info()}
-
-## Training Configuration
-
-```json
-{json.dumps(training_config, indent=2)}
-```
-
-## Training Results
-
-```json
-{json.dumps(results, indent=2)}
-```
-
-## Usage
-
-```python
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-# Load model and tokenizer
-model = AutoModelForCausalLM.from_pretrained("{self.repo_id}")
-tokenizer = AutoTokenizer.from_pretrained("{self.repo_id}")
-
-# Generate text
-inputs = tokenizer("Hello, how are you?", return_tensors="pt")
-outputs = model.generate(**inputs, max_new_tokens=100)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-```
-
-## Training Information
-
-- **Base Model**: HuggingFaceTB/SmolLM3-3B
-- **Hardware**: {self._get_hardware_info()}
-- **Training Time**: {results.get('training_time_hours', 'Unknown')} hours
-- **Final Loss**: {results.get('final_loss', 'Unknown')}
-- **Final Accuracy**: {results.get('final_accuracy', 'Unknown')}
-- **Dataset Repository**: {self.dataset_repo}
-
-## Model Performance
-
-- **Training Loss**: {results.get('train_loss', 'Unknown')}
-- **Validation Loss**: {results.get('eval_loss', 'Unknown')}
-- **Training Steps**: {results.get('total_steps', 'Unknown')}
-
-## Experiment Tracking
-
-This model was trained with experiment tracking enabled. Training metrics and configuration are stored in the HF Dataset repository: `{self.dataset_repo}`
-
-## Limitations and Biases
-
-This model is fine-tuned for specific tasks and may not generalize well to all use cases. Please evaluate the model's performance on your specific task before deployment.
-
-## License
-
-This model is licensed under the Apache 2.0 License.
-"""
+processor = AutoProcessor.from_pretrained("{self.repo_id}")
+model = AutoModelForSeq2SeqLM.from_pretrained("{self.repo_id}")
+```"""),
+            "",
+            "## Training Configuration",
+            "",
+            f"```json\n{json.dumps(training_config or {}, indent=2)}\n```",
+            "",
+            "## Training Results",
+            "",
+            f"```json\n{json.dumps(results or {}, indent=2)}\n```",
+            "",
+            f"**Hardware**: {self._get_hardware_info()}",
+        ]
+        return fm_yaml + "\n".join(body)
     
     def _get_model_size(self) -> float:
         """Get model size in GB"""
