@@ -50,24 +50,45 @@ def get_username_from_token(token: str) -> Optional[str]:
 def run_command_stream(args: list[str], env: Dict[str, str], cwd: Optional[Path] = None) -> Generator[str, None, int]:
     import subprocess
     import shlex
-    yield f"$ {' '.join(shlex.quote(a) for a in ([get_python()] + args))}"
-    process = subprocess.Popen(
-        [get_python()] + args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=env,
-        cwd=str(cwd or PROJECT_ROOT),
-        bufsize=1,
-        universal_newlines=True,
-    )
-    assert process.stdout is not None
-    for line in iter(process.stdout.readline, ""):
-        yield line.rstrip()
-    process.stdout.close()
-    code = process.wait()
-    yield f"[exit_code={code}]"
-    return code
+    try:
+        cmd_line = ' '.join(shlex.quote(a) for a in ([get_python()] + args))
+        yield f"$ {cmd_line}"
+
+        process = subprocess.Popen(
+            [get_python()] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            cwd=str(cwd or PROJECT_ROOT),
+            bufsize=1,
+            universal_newlines=True,
+        )
+
+        if process.stdout is None:
+            yield "❌ Error: Could not capture process output"
+            return 1
+
+        for line in iter(process.stdout.readline, ""):
+            if line.strip():  # Only yield non-empty lines
+                yield line.rstrip()
+
+        process.stdout.close()
+        code = process.wait()
+
+        if code != 0:
+            yield f"❌ Command failed with exit code: {code}"
+        else:
+            yield f"✅ Command completed successfully (exit code: {code})"
+
+        return code
+
+    except FileNotFoundError as e:
+        yield f"❌ Error: Python executable not found: {e}"
+        return 1
+    except Exception as e:
+        yield f"❌ Error running command: {str(e)}"
+        return 1
 
 
 def detect_nvidia_driver() -> Tuple[bool, str]:
@@ -290,64 +311,93 @@ def start_voxtral_training(
     freeze_audio_tower: bool,
     push_to_hub: bool,
     deploy_demo: bool,
-) -> Generator[str, None, None]:
+) -> str:
+    """Start Voxtral training and return collected logs as a string."""
     env = os.environ.copy()
     write_token = env.get("HF_WRITE_TOKEN") or env.get("HF_TOKEN")
     read_token = env.get("HF_READ_TOKEN")
     username = get_username_from_token(write_token or "") or env.get("HF_USERNAME") or ""
     output_dir = PROJECT_ROOT / "outputs" / repo_short
 
-    # 1) Train
-    script = PROJECT_ROOT / ("scripts/train_lora.py" if use_lora else "scripts/train.py")
-    args = [str(script)]
-    if jsonl_path:
-        args += ["--dataset-jsonl", jsonl_path]
-    args += [
-        "--model-checkpoint", base_model,
-        "--train-count", str(train_count),
-        "--eval-count", str(eval_count),
-        "--batch-size", str(batch_size),
-        "--grad-accum", str(grad_accum),
-        "--learning-rate", str(learning_rate),
-        "--epochs", str(epochs),
-        "--output-dir", str(output_dir),
-        "--save-steps", "50",
-    ]
-    if use_lora:
+    # Collect all logs
+    all_logs = []
+
+    def collect_logs(generator):
+        """Helper to collect logs from a generator."""
+        for line in generator:
+            all_logs.append(line)
+            print(line)  # Also print to console for debugging
+
+    try:
+        # 1) Train
+        script = PROJECT_ROOT / ("scripts/train_lora.py" if use_lora else "scripts/train.py")
+        args = [str(script)]
+        if jsonl_path:
+            args += ["--dataset-jsonl", jsonl_path]
         args += [
-            "--lora-r", str(lora_r),
-            "--lora-alpha", str(lora_alpha),
-            "--lora-dropout", str(lora_dropout),
+            "--model-checkpoint", base_model,
+            "--train-count", str(train_count),
+            "--eval-count", str(eval_count),
+            "--batch-size", str(batch_size),
+            "--grad-accum", str(grad_accum),
+            "--learning-rate", str(learning_rate),
+            "--epochs", str(epochs),
+            "--output-dir", str(output_dir),
+            "--save-steps", "50",
         ]
-        if freeze_audio_tower:
-            args += ["--freeze-audio-tower"]
-    for line in run_command_stream(args, env):
-        yield line
+        if use_lora:
+            args += [
+                "--lora-r", str(lora_r),
+                "--lora-alpha", str(lora_alpha),
+                "--lora-dropout", str(lora_dropout),
+            ]
+            if freeze_audio_tower:
+                args += ["--freeze-audio-tower"]
 
-    # 2) Push to Hub
-    if push_to_hub:
-        repo_name = f"{username}/{repo_short}" if username else repo_short
-        push_args = [
-            str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
-            "model",
-            str(output_dir),
-            repo_name,
-        ]
-        for line in run_command_stream(push_args, env):
-            yield line
+        all_logs.append("🚀 Starting Voxtral training...")
+        collect_logs(run_command_stream(args, env))
+        all_logs.append("✅ Training completed!")
 
-    # 3) Deploy demo Space
-    if deploy_demo and username:
-        deploy_args = [
-            str(PROJECT_ROOT / "scripts/deploy_demo_space.py"),
-            "--hf-token", write_token or "",
-            "--hf-username", username,
-            "--model-id", f"{username}/{repo_short}",
-            "--demo-type", "voxtral",
-            "--space-name", f"{repo_short}-demo",
-        ]
-        for line in run_command_stream(deploy_args, env):
-            yield line
+        # 2) Push to Hub
+        if push_to_hub:
+            if not username:
+                all_logs.append("❌ Cannot push to Hub: No username available. Set HF_TOKEN or HF_USERNAME.")
+            else:
+                repo_name = f"{username}/{repo_short}"
+                push_args = [
+                    str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
+                    "model",
+                    str(output_dir),
+                    repo_name,
+                ]
+                all_logs.append(f"📤 Pushing model to Hugging Face Hub: {repo_name}")
+                collect_logs(run_command_stream(push_args, env))
+                all_logs.append("✅ Model pushed successfully!")
+
+        # 3) Deploy demo Space
+        if deploy_demo and username:
+            deploy_args = [
+                str(PROJECT_ROOT / "scripts/deploy_demo_space.py"),
+                "--hf-token", write_token or "",
+                "--hf-username", username,
+                "--model-id", f"{username}/{repo_short}",
+                "--demo-type", "voxtral",
+                "--space-name", f"{repo_short}-demo",
+            ]
+            all_logs.append("🚀 Deploying demo Space...")
+            collect_logs(run_command_stream(deploy_args, env))
+            all_logs.append("✅ Demo Space deployed!")
+
+        # Return all collected logs as a single string
+        return "\n".join(all_logs)
+
+    except Exception as e:
+        error_msg = f"❌ Error during training: {str(e)}"
+        all_logs.append(error_msg)
+        print(error_msg)  # Also print to console
+        import traceback
+        traceback.print_exc()
+        return "\n".join(all_logs)
 
 
 def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
@@ -371,35 +421,45 @@ def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
     if max_phrases is None:
         max_phrases = 1000
 
-    # Language code mapping for Granary dataset
-    # Granary supports these language codes directly
-    granary_supported_langs = {
-        "en": "en", "de": "de", "fr": "fr", "es": "es", "it": "it",
-        "pl": "pl", "pt": "pt", "nl": "nl", "ru": "ru", "ar": "ar",
-        "zh": "zh", "ja": "ja", "ko": "ko", "da": "da", "sv": "sv",
-        "no": "no", "fi": "fi", "et": "et", "lv": "lv", "lt": "lt",
-        "sl": "sl", "sk": "sk", "cs": "cs", "hr": "hr", "bg": "bg",
-        "uk": "uk", "ro": "ro", "hu": "hu", "el": "el", "mt": "mt"
+    # Language code mapping for CohereLabs AYA Collection dataset
+    # All Voxtral Mini supported languages are available in AYA Collection
+    aya_supported_langs = {
+        "en": "english",    # English
+        "fr": "french",     # French
+        "de": "german",     # German
+        "es": "spanish",    # Spanish
+        "it": "italian",    # Italian
+        "pt": "portuguese", # Portuguese
+        "nl": "dutch",      # Dutch
+        "hi": "hindi"       # Hindi
     }
 
-    # Map input language to Granary configuration
-    granary_lang = granary_supported_langs.get(language, "en")  # Default to English
+    # Map input language to CohereLabs AYA Collection configuration
+    aya_lang = aya_supported_langs.get(language)
+
+    if not aya_lang:
+        raise Exception(f"Language {language} not supported in CohereLabs AYA Collection dataset")
 
     try:
-        print(f"Loading phrases from NVIDIA Granary dataset for language: {language}")
+        print(f"Loading phrases from CohereLabs AYA Collection dataset for language: {language}")
 
         # Check for authentication token
         token = os.getenv("HF_TOKEN") or os.getenv("HF_WRITE_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
 
-        # Load Granary dataset with ASR (speech recognition) split
-        # Use streaming to handle large datasets efficiently
+        # Try to load CohereLabs AYA Collection dataset for the specified language
         if token:
-            print(f"Using authentication token for Granary dataset access")
-            ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True, token=token)
+            try:
+                ds = load_dataset("CohereLabs/aya_collection_language_split", aya_lang, split="train", streaming=True, token=token)
+                print(f"Successfully loaded CohereLabs AYA Collection {language} dataset")
+            except Exception as e:
+                # Fallback to other datasets
+                print(f"CohereLabs AYA Collection {language} not available ({e}), trying alternative datasets")
+                raise Exception("AYA Collection not available")
         else:
-            print(f"No HF_TOKEN found, attempting to load Granary dataset without authentication")
-            ds = load_dataset("nvidia/Granary", granary_lang, split="asr", streaming=True)
+            print("No HF_TOKEN found for CohereLabs AYA Collection dataset")
+            raise Exception("No token available")
 
+        # Common processing for both dataset types
         phrases = []
         count = 0
         seen_phrases = set()
@@ -409,8 +469,10 @@ def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
             if count >= max_phrases:
                 break
 
-            # Extract the text transcription
-            text = example.get("text", "").strip()
+            # Extract text from CohereLabs AYA Collection format: combine inputs and targets
+            inputs_text = example.get("inputs", "").strip()
+            targets_text = example.get("targets", "").strip()
+            text = f"{inputs_text} {targets_text}".strip()
 
             # Filter for quality phrases
             if (text and
@@ -427,45 +489,206 @@ def load_multilingual_phrases(language="en", max_phrases=None, split="train"):
         if phrases:
             # Shuffle the phrases for variety
             random.shuffle(phrases)
-            print(f"Successfully loaded {len(phrases)} phrases from Granary dataset for {language}")
+            dataset_name = "CohereLabs AYA Collection"
+            print(f"Successfully loaded {len(phrases)} phrases from {dataset_name} dataset for {language}")
             return phrases
 
         else:
-            print(f"No suitable phrases found in Granary dataset for {language}")
+            print(f"No suitable phrases found in dataset for {language}")
             raise Exception("No phrases found")
 
     except Exception as e:
         error_msg = str(e).lower()
         if "401" in error_msg or "unauthorized" in error_msg:
-            print(f"Granary dataset authentication failed for {language}: {e}")
+            print(f"CohereLabs AYA Collection authentication failed for {language}: {e}")
             print("This dataset requires a Hugging Face token. Please set HF_TOKEN environment variable.")
         else:
-            print(f"Granary dataset loading failed for {language}: {e}")
+            print(f"CohereLabs AYA Collection loading failed for {language}: {e}")
 
-        # Fallback to basic phrases if Granary fails
+        # Fallback to basic phrases if dataset loading fails
         print("Using fallback phrases")
-        fallback_phrases = [
-            "The quick brown fox jumps over the lazy dog.",
-            "Please say your full name.",
-            "Today is a good day to learn something new.",
-            "Artificial intelligence helps with many tasks.",
-            "I enjoy reading books and listening to music.",
-            "This is a sample sentence for testing speech.",
-            "Speak clearly and at a normal pace.",
-            "Numbers like one, two, three are easy to say.",
-            "The weather is sunny with a chance of rain.",
-            "Thank you for taking the time to help.",
-            "Hello, how are you today?",
-            "I would like to order a pizza.",
-            "The meeting is scheduled for tomorrow.",
-            "Please call me back as soon as possible.",
-            "Thank you for your assistance.",
-            "Can you help me with this problem?",
-            "I need to make a reservation.",
-            "The weather looks beautiful outside.",
-            "Let's go for a walk in the park.",
-            "I enjoy listening to classical music.",
-        ]
+
+        # Language-specific fallback phrases
+        language_fallbacks = {
+            "hi": [
+                "नमस्ते, आज आप कैसे हैं?",
+                "मेरा नाम राजेश कुमार है।",
+                "आज का मौसम बहुत अच्छा है।",
+                "मैं हिंदी में बात करना चाहता हूं।",
+                "कृपया धीरे और स्पष्ट बोलें।",
+                "यह एक परीक्षण वाक्य है।",
+                "मैं पुस्तकें पढ़ना पसंद करता हूं।",
+                "क्या आप मेरी मदद कर सकते हैं?",
+                "आपका फोन नंबर क्या है?",
+                "मैं कल सुबह आऊंगा।",
+                "धन्यवाद, आपका समय देने के लिए।",
+                "यह जगह बहुत सुंदर है।",
+                "मैं भोजन तैयार करना सीख रहा हूं।",
+                "क्या यह रास्ता सही है?",
+                "मैं स्कूल जाना चाहता हूं।",
+                "आपकी उम्र क्या है?",
+                "यह कितने का है?",
+                "मैं थक गया हूं।",
+                "आप कहां से हैं?",
+                "चलिए पार्क में टहलते हैं।"
+            ],
+            "en": [
+                "Hello, how are you today?",
+                "My name is John Smith.",
+                "The weather is very nice today.",
+                "I want to speak in English.",
+                "Please speak slowly and clearly.",
+                "This is a test sentence.",
+                "I enjoy reading books.",
+                "Can you help me?",
+                "What is your phone number?",
+                "I will come tomorrow morning.",
+                "Thank you for your time.",
+                "This place is very beautiful.",
+                "I am learning to cook food.",
+                "Is this the right way?",
+                "I want to go to school.",
+                "How old are you?",
+                "How much does this cost?",
+                "I am tired.",
+                "Where are you from?",
+                "Let's go for a walk in the park."
+            ],
+            "fr": [
+                "Bonjour, comment allez-vous aujourd'hui?",
+                "Je m'appelle Jean Dupont.",
+                "Le temps est très beau aujourd'hui.",
+                "Je veux parler en français.",
+                "Parlez lentement et clairement s'il vous plaît.",
+                "Ceci est une phrase de test.",
+                "J'aime lire des livres.",
+                "Pouvez-vous m'aider?",
+                "Quel est votre numéro de téléphone?",
+                "Je viendrai demain matin.",
+                "Merci pour votre temps.",
+                "Cet endroit est très beau.",
+                "J'apprends à cuisiner.",
+                "Est-ce le bon chemin?",
+                "Je veux aller à l'école.",
+                "Quel âge avez-vous?",
+                "Combien cela coûte-t-il?",
+                "Je suis fatigué.",
+                "D'où venez-vous?",
+                "Allons nous promener dans le parc."
+            ],
+            "de": [
+                "Hallo, wie geht es Ihnen heute?",
+                "Mein Name ist Hans Müller.",
+                "Das Wetter ist heute sehr schön.",
+                "Ich möchte auf Deutsch sprechen.",
+                "Sprechen Sie bitte langsam und deutlich.",
+                "Dies ist ein Testsatz.",
+                "Ich lese gerne Bücher.",
+                "Können Sie mir helfen?",
+                "Wie ist Ihre Telefonnummer?",
+                "Ich komme morgen früh.",
+                "Vielen Dank für Ihre Zeit.",
+                "Dieser Ort ist sehr schön.",
+                "Ich lerne kochen.",
+                "Ist das der richtige Weg?",
+                "Ich möchte zur Schule gehen.",
+                "Wie alt sind Sie?",
+                "Wie viel kostet das?",
+                "Ich bin müde.",
+                "Woher kommen Sie?",
+                "Lassen Sie uns im Park spazieren gehen."
+            ],
+            "es": [
+                "Hola, ¿cómo estás hoy?",
+                "Me llamo Juan García.",
+                "El tiempo está muy bueno hoy.",
+                "Quiero hablar en español.",
+                "Por favor habla despacio y claro.",
+                "Esta es una oración de prueba.",
+                "Me gusta leer libros.",
+                "¿Puedes ayudarme?",
+                "¿Cuál es tu número de teléfono?",
+                "Vendré mañana por la mañana.",
+                "Gracias por tu tiempo.",
+                "Este lugar es muy bonito.",
+                "Estoy aprendiendo a cocinar.",
+                "¿Es este el camino correcto?",
+                "Quiero ir a la escuela.",
+                "¿Cuántos años tienes?",
+                "¿Cuánto cuesta esto?",
+                "Estoy cansado.",
+                "¿De dónde eres?",
+                "Vamos a caminar por el parque."
+            ],
+            "it": [
+                "Ciao, come stai oggi?",
+                "Mi chiamo Mario Rossi.",
+                "Il tempo è molto bello oggi.",
+                "Voglio parlare in italiano.",
+                "Per favore parla lentamente e chiaramente.",
+                "Questa è una frase di prova.",
+                "Mi piace leggere libri.",
+                "Puoi aiutarmi?",
+                "Qual è il tuo numero di telefono?",
+                "Verrò domani mattina.",
+                "Grazie per il tuo tempo.",
+                "Questo posto è molto bello.",
+                "Sto imparando a cucinare.",
+                "È questa la strada giusta?",
+                "Voglio andare a scuola.",
+                "Quanti anni hai?",
+                "Quanto costa questo?",
+                "Sono stanco.",
+                "Da dove vieni?",
+                "Andiamo a fare una passeggiata nel parco."
+            ],
+            "pt": [
+                "Olá, como você está hoje?",
+                "Meu nome é João Silva.",
+                "O tempo está muito bom hoje.",
+                "Quero falar em português.",
+                "Por favor fale devagar e claramente.",
+                "Esta é uma frase de teste.",
+                "Eu gosto de ler livros.",
+                "Você pode me ajudar?",
+                "Qual é o seu número de telefone?",
+                "Vou vir amanhã de manhã.",
+                "Obrigado pelo seu tempo.",
+                "Este lugar é muito bonito.",
+                "Estou aprendendo a cozinhar.",
+                "Este é o caminho certo?",
+                "Quero ir para a escola.",
+                "Quantos anos você tem?",
+                "Quanto custa isso?",
+                "Estou cansado.",
+                "De onde você é?",
+                "Vamos dar um passeio no parque."
+            ],
+            "nl": [
+                "Hallo, hoe gaat het vandaag met je?",
+                "Mijn naam is Jan de Vries.",
+                "Het weer is vandaag erg mooi.",
+                "Ik wil in het Nederlands spreken.",
+                "Spreek langzaam en duidelijk alstublieft.",
+                "Dit is een testzin.",
+                "Ik houd van het lezen van boeken.",
+                "Kun je me helpen?",
+                "Wat is je telefoonnummer?",
+                "Ik kom morgenochtend.",
+                "Bedankt voor je tijd.",
+                "Deze plek is erg mooi.",
+                "Ik leer koken.",
+                "Is dit de juiste weg?",
+                "Ik wil naar school gaan.",
+                "Hoe oud ben je?",
+                "Hoeveel kost dit?",
+                "Ik ben moe.",
+                "Waar kom je vandaan?",
+                "Laten we een wandeling maken in het park."
+            ]
+        }
+
+        fallback_phrases = language_fallbacks.get(language, language_fallbacks["en"])
 
         if max_phrases:
             fallback_phrases = random.sample(fallback_phrases, min(max_phrases, len(fallback_phrases)))
@@ -523,7 +746,8 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
                     ⚠️ No HF_TOKEN detected
                 </p>
                 <p style="color: rgb(234, 88, 12); margin: 6px 0 0; font-size: 12px;">
-                    Set HF_TOKEN environment variable to access NVIDIA Granary dataset with authentic multilingual phrases.
+                    Set HF_TOKEN environment variable to access CohereLabs AYA Collection dataset with authentic multilingual phrases.
+                    This dataset provides high-quality text in 100+ languages for all Voxtral Mini supported languages.
                     Currently using fallback phrases for demonstration.
                 </p>
             </div>
@@ -533,43 +757,21 @@ with gr.Blocks(title="Voxtral ASR Fine-tuning") as demo:
     # Hidden state to track dataset JSONL path
     jsonl_path_state = gr.State("")
 
-    # Language selection for NVIDIA Granary phrases
+    # Language selection for Voxtral Mini supported languages
     language_selector = gr.Dropdown(
         choices=[
             ("English", "en"),
-            ("German", "de"),
             ("French", "fr"),
+            ("German", "de"),
             ("Spanish", "es"),
             ("Italian", "it"),
             ("Portuguese", "pt"),
-            ("Polish", "pl"),
             ("Dutch", "nl"),
-            ("Russian", "ru"),
-            ("Arabic", "ar"),
-            ("Chinese", "zh"),
-            ("Japanese", "ja"),
-            ("Korean", "ko"),
-            ("Danish", "da"),
-            ("Swedish", "sv"),
-            ("Norwegian", "no"),
-            ("Finnish", "fi"),
-            ("Estonian", "et"),
-            ("Latvian", "lv"),
-            ("Lithuanian", "lt"),
-            ("Slovenian", "sl"),
-            ("Slovak", "sk"),
-            ("Czech", "cs"),
-            ("Croatian", "hr"),
-            ("Bulgarian", "bg"),
-            ("Ukrainian", "uk"),
-            ("Romanian", "ro"),
-            ("Hungarian", "hu"),
-            ("Greek", "el"),
-            ("Maltese", "mt")
+            ("Hindi", "hi")
         ],
         value="en",
         label="Language for Speech Phrases",
-        info="Select language for authentic phrases from NVIDIA Granary dataset (25 European languages)"
+        info="Select language for authentic phrases (Voxtral Mini supported languages). All languages use CohereLabs AYA Collection dataset when HF_TOKEN is available."
     )
 
     # Recording grid with dynamic text readouts

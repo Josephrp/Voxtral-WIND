@@ -1,7 +1,13 @@
 torch
+triton
+torchvision
+torchaudio
 datasets
 peft
 transformers
 gradio
 trackio
 huggingface_hub
+soundfile
+librosa
+mistral-common
