@@ -24,6 +24,7 @@ Get your token from: https://huggingface.co/settings/tokens
 
 import argparse
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Optional
@@ -285,50 +286,117 @@ def main():
     if not trackio_space:
         trackio_space = get_default_space_name("voxtral-lora-finetuning")
 
-    # Initialize trackio for experiment tracking
+    # Initialize trackio for experiment tracking with retry logic
+    trackio_enabled = False
     if trackio_space:
         print(f"Initializing trackio with space: {trackio_space}")
-        trackio.init(
-            project="voxtral-lora-finetuning",
-            config={
-                "model_checkpoint": model_checkpoint,
-                "output_dir": output_dir,
-                "batch_size": args.batch_size,
-                "learning_rate": args.learning_rate,
-                "epochs": args.epochs,
-                "train_count": args.train_count,
-                "eval_count": args.eval_count,
-                "dataset_jsonl": args.dataset_jsonl,
-                "dataset_name": args.dataset_name,
-                "dataset_config": args.dataset_config,
-                "lora_r": args.lora_r,
-                "lora_alpha": args.lora_alpha,
-                "lora_dropout": args.lora_dropout,
-                "freeze_audio_tower": args.freeze_audio_tower,
-            },
-            space_id=trackio_space
-        )
+        try:
+            trackio.init(
+                project="voxtral-lora-finetuning",
+                config={
+                    "model_checkpoint": model_checkpoint,
+                    "output_dir": output_dir,
+                    "batch_size": args.batch_size,
+                    "learning_rate": args.learning_rate,
+                    "epochs": args.epochs,
+                    "train_count": args.train_count,
+                    "eval_count": args.eval_count,
+                    "dataset_jsonl": args.dataset_jsonl,
+                    "dataset_name": args.dataset_name,
+                    "dataset_config": args.dataset_config,
+                    "lora_r": args.lora_r,
+                    "lora_alpha": args.lora_alpha,
+                    "lora_dropout": args.lora_dropout,
+                    "freeze_audio_tower": args.freeze_audio_tower,
+                },
+                space_id=trackio_space
+            )
+            trackio_enabled = True
+            print("✅ Trackio initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize trackio with space: {e}")
+            print("⏳ Waiting 3 minutes for space to deploy before retrying...")
+            time.sleep(180)  # Wait 3 minutes (180 seconds)
+
+            print("🔄 Retrying trackio initialization with space...")
+            try:
+                trackio.init(
+                    project="voxtral-lora-finetuning",
+                    config={
+                        "model_checkpoint": model_checkpoint,
+                        "output_dir": output_dir,
+                        "batch_size": args.batch_size,
+                        "learning_rate": args.learning_rate,
+                        "epochs": args.epochs,
+                        "train_count": args.train_count,
+                        "eval_count": args.eval_count,
+                        "dataset_jsonl": args.dataset_jsonl,
+                        "dataset_name": args.dataset_name,
+                        "dataset_config": args.dataset_config,
+                        "lora_r": args.lora_r,
+                        "lora_alpha": args.lora_alpha,
+                        "lora_dropout": args.lora_dropout,
+                        "freeze_audio_tower": args.freeze_audio_tower,
+                    },
+                    space_id=trackio_space
+                )
+                trackio_enabled = True
+                print("✅ Trackio initialized successfully after retry")
+            except Exception as retry_e:
+                print(f"❌ Retry also failed: {retry_e}")
+                print("🔄 Falling back to local-only mode...")
+                try:
+                    trackio.init(
+                        project="voxtral-lora-finetuning",
+                        config={
+                            "model_checkpoint": model_checkpoint,
+                            "output_dir": output_dir,
+                            "batch_size": args.batch_size,
+                            "learning_rate": args.learning_rate,
+                            "epochs": args.epochs,
+                            "train_count": args.train_count,
+                            "eval_count": args.eval_count,
+                            "dataset_jsonl": args.dataset_jsonl,
+                            "dataset_name": args.dataset_name,
+                            "dataset_config": args.dataset_config,
+                            "lora_r": args.lora_r,
+                            "lora_alpha": args.lora_alpha,
+                            "lora_dropout": args.lora_dropout,
+                            "freeze_audio_tower": args.freeze_audio_tower,
+                        }
+                    )
+                    trackio_enabled = True
+                    print("✅ Trackio initialized in local-only mode")
+                except Exception as fallback_e:
+                    print(f"❌ Failed to initialize trackio in local mode: {fallback_e}")
+                    print("⚠️ Training will continue without experiment tracking")
     else:
         print("Initializing trackio in local-only mode")
-        trackio.init(
-            project="voxtral-lora-finetuning",
-            config={
-                "model_checkpoint": model_checkpoint,
-                "output_dir": output_dir,
-                "batch_size": args.batch_size,
-                "learning_rate": args.learning_rate,
-                "epochs": args.epochs,
-                "train_count": args.train_count,
-                "eval_count": args.eval_count,
-                "dataset_jsonl": args.dataset_jsonl,
-                "dataset_name": args.dataset_name,
-                "dataset_config": args.dataset_config,
-                "lora_r": args.lora_r,
-                "lora_alpha": args.lora_alpha,
-                "lora_dropout": args.lora_dropout,
-                "freeze_audio_tower": args.freeze_audio_tower,
-            }
-        )
+        try:
+            trackio.init(
+                project="voxtral-lora-finetuning",
+                config={
+                    "model_checkpoint": model_checkpoint,
+                    "output_dir": output_dir,
+                    "batch_size": args.batch_size,
+                    "learning_rate": args.learning_rate,
+                    "epochs": args.epochs,
+                    "train_count": args.train_count,
+                    "eval_count": args.eval_count,
+                    "dataset_jsonl": args.dataset_jsonl,
+                    "dataset_name": args.dataset_name,
+                    "dataset_config": args.dataset_config,
+                    "lora_r": args.lora_r,
+                    "lora_alpha": args.lora_alpha,
+                    "lora_dropout": args.lora_dropout,
+                    "freeze_audio_tower": args.freeze_audio_tower,
+                }
+            )
+            trackio_enabled = True
+            print("✅ Trackio initialized in local-only mode")
+        except Exception as e:
+            print(f"❌ Failed to initialize trackio: {e}")
+            print("⚠️ Training will continue without experiment tracking")
 
     print("Loading processor and model...")
     processor = VoxtralProcessor.from_pretrained(model_checkpoint)
@@ -397,8 +465,9 @@ def main():
     if eval_dataset:
         results = trainer.evaluate()
         print(f"Final evaluation results: {results}")
-        # Log final evaluation results
-        trackio.log(results)
+        # Log final evaluation results if trackio is enabled
+        if trackio_enabled:
+            trackio.log(results)
 
     # Push dataset to Hub if requested
     if args.push_dataset and args.dataset_jsonl:
@@ -433,8 +502,9 @@ def main():
         except Exception as e:
             print(f"❌ Error pushing dataset: {e}")
 
-    # Finish trackio logging
-    trackio.finish()
+    # Finish trackio logging if enabled
+    if trackio_enabled:
+        trackio.finish()
 
     print("Training completed successfully!")
 

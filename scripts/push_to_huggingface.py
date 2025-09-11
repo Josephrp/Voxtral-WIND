@@ -137,54 +137,126 @@ class HuggingFacePusher:
     
     def _detect_artifact_type(self) -> str:
         """Detect whether output dir contains a full model or a LoRA adapter."""
-        # LoRA artifacts
-        lora_candidates = [
-            self.model_path / "adapter_config.json",
-            self.model_path / "adapter_model.safetensors",
-            self.model_path / "adapter_model.bin",
-        ]
-        if any(p.exists() for p in lora_candidates) and (self.model_path / "adapter_config.json").exists():
+        logger.info(f"Detecting model artifacts in: {self.model_path}")
+
+        # Check if path exists
+        if not self.model_path.exists():
+            logger.error(f"❌ Model path does not exist: {self.model_path}")
+            return "unknown"
+
+        # List all files for debugging
+        all_files = list(self.model_path.rglob("*"))
+        logger.info(f"📁 Found {len(all_files)} files in model directory")
+        if len(all_files) <= 20:  # Only show if not too many files
+            for f in all_files:
+                logger.info(f"   - {f.relative_to(self.model_path)}")
+
+        # LoRA artifacts - be more flexible about file combinations
+        lora_config = self.model_path / "adapter_config.json"
+        lora_weights_safetensors = self.model_path / "adapter_model.safetensors"
+        lora_weights_bin = self.model_path / "adapter_model.bin"
+
+        has_lora_config = lora_config.exists()
+        has_lora_weights = lora_weights_safetensors.exists() or lora_weights_bin.exists()
+
+        if has_lora_config:
+            logger.info("✅ Found adapter_config.json")
+        if has_lora_weights:
+            logger.info("✅ Found LoRA weight files")
+
+        if has_lora_config and has_lora_weights:
+            logger.info("🎯 Detected LoRA adapter artifacts")
             return "lora"
+        elif has_lora_config:
+            logger.warning("⚠️ Found adapter_config.json but no weight files")
+        elif has_lora_weights:
+            logger.warning("⚠️ Found LoRA weight files but no adapter_config.json")
 
-        # Full model artifacts
-        full_candidates = [
-            self.model_path / "config.json",
-            self.model_path / "model.safetensors",
-            self.model_path / "model.safetensors.index.json",
-            self.model_path / "pytorch_model.bin",
-        ]
-        if any(p.exists() for p in full_candidates):
+        # Full model artifacts - also be more flexible
+        config_file = self.model_path / "config.json"
+        safetensors_model = self.model_path / "model.safetensors"
+        safetensors_index = self.model_path / "model.safetensors.index.json"
+        pytorch_model = self.model_path / "pytorch_model.bin"
+
+        has_config = config_file.exists()
+        has_weights = (safetensors_model.exists() or safetensors_index.exists() or pytorch_model.exists())
+
+        if has_config:
+            logger.info("✅ Found config.json")
+        if has_weights:
+            logger.info("✅ Found model weight files")
+
+        if has_config and has_weights:
+            logger.info("🎯 Detected full model artifacts")
             return "full"
+        elif has_config:
+            logger.warning("⚠️ Found config.json but no weight files")
+        elif has_weights:
+            logger.warning("⚠️ Found weight files but no config.json")
 
+        logger.error("❌ Could not detect model artifacts (neither full model nor LoRA)")
         return "unknown"
 
     def validate_model_path(self) -> bool:
         """Validate that the model path contains required files for Voxtral full or LoRA."""
         self.artifact_type = self._detect_artifact_type()
+
+        if self.artifact_type == "unknown":
+            logger.error("❌ Could not detect model type. Expected files:")
+            logger.error("   For LoRA: adapter_config.json + adapter_model.safetensors (or .bin)")
+            logger.error("   For Full Model: config.json + model.safetensors (or pytorch_model.bin)")
+            logger.error("   For Voxtral ASR: also look for processor_config.json, tokenizer.json, etc.")
+            return False
+
         if self.artifact_type == "lora":
-            required = [self.model_path / "adapter_config.json"]
-            if not all(p.exists() for p in required):
-                logger.error("❌ LoRA artifacts missing required files (adapter_config.json)")
+            # Check for required LoRA files
+            config_file = self.model_path / "adapter_config.json"
+            weights_file_safetensors = self.model_path / "adapter_model.safetensors"
+            weights_file_bin = self.model_path / "adapter_model.bin"
+
+            if not config_file.exists():
+                logger.error("❌ LoRA adapter missing required file: adapter_config.json")
                 return False
-            # At least one adapter weight
-            if not ((self.model_path / "adapter_model.safetensors").exists() or (self.model_path / "adapter_model.bin").exists()):
-                logger.error("❌ LoRA artifacts missing adapter weights (adapter_model.safetensors or adapter_model.bin)")
+
+            if not (weights_file_safetensors.exists() or weights_file_bin.exists()):
+                logger.error("❌ LoRA adapter missing weight files: adapter_model.safetensors or adapter_model.bin")
                 return False
-            logger.info("✅ Detected LoRA adapter artifacts")
+
+            logger.info("✅ LoRA adapter validation successful")
+            logger.info(f"   - Config: {config_file.name}")
+            if weights_file_safetensors.exists():
+                logger.info(f"   - Weights: {weights_file_safetensors.name}")
+            elif weights_file_bin.exists():
+                logger.info(f"   - Weights: {weights_file_bin.name}")
+
             return True
 
         if self.artifact_type == "full":
-            # Relaxed set: require config.json and at least one model weights file
-            if not (self.model_path / "config.json").exists():
-                logger.error("❌ Missing config.json in model directory")
+            # Check for required full model files
+            config_file = self.model_path / "config.json"
+            safetensors_file = self.model_path / "model.safetensors"
+            safetensors_index = self.model_path / "model.safetensors.index.json"
+            pytorch_file = self.model_path / "pytorch_model.bin"
+
+            if not config_file.exists():
+                logger.error("❌ Full model missing required file: config.json")
                 return False
-            if not ((self.model_path / "model.safetensors").exists() or (self.model_path / "model.safetensors.index.json").exists() or (self.model_path / "pytorch_model.bin").exists()):
-                logger.error("❌ Missing model weights file (model.safetensors or pytorch_model.bin)")
+
+            if not (safetensors_file.exists() or safetensors_index.exists() or pytorch_file.exists()):
+                logger.error("❌ Full model missing weight files: model.safetensors, model.safetensors.index.json, or pytorch_model.bin")
                 return False
-            logger.info("✅ Detected full model artifacts")
+
+            logger.info("✅ Full model validation successful")
+            logger.info(f"   - Config: {config_file.name}")
+            if safetensors_file.exists():
+                logger.info(f"   - Weights: {safetensors_file.name}")
+            elif safetensors_index.exists():
+                logger.info(f"   - Weights: {safetensors_index.name} (sharded)")
+            elif pytorch_file.exists():
+                logger.info(f"   - Weights: {pytorch_file.name}")
+
             return True
 
-        logger.error("❌ Could not detect model artifacts (neither full model nor LoRA)")
         return False
     
     def create_model_card(self, training_config: Dict[str, Any], results: Dict[str, Any]) -> str:
@@ -455,9 +527,16 @@ MIT License
                    results: Optional[Dict[str, Any]] = None) -> bool:
         """Complete model push process"""
         logger.info(f"🚀 Starting model push to {self.repo_id}")
+        logger.info(f"📂 Model path: {self.model_path}")
+        logger.info(f"🎯 Repository: {self.repo_id}")
 
         # Validate model path
         if not self.validate_model_path():
+            logger.error("❌ Model validation failed. Please check:")
+            logger.error("   1. The model path exists and contains the expected files")
+            logger.error("   2. For LoRA models: adapter_config.json and adapter_model.* files")
+            logger.error("   3. For full models: config.json and model weight files")
+            logger.error("   4. Make sure the training completed successfully and saved the model")
             return False
 
         # Create repository

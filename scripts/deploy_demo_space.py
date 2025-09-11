@@ -566,7 +566,7 @@ os.environ['BRAND_PROJECT_URL'] = {_json.dumps(self.brand_project_url)}
                     f"app_file: app.py\n"
                     f"pinned: false\n"
                     f"short_description: Interactive demo for {self.model_id}\n"
-                    + ("license: mit\n" if self.demo_type != 'gpt' else "") +
+                    + ("license: mit\\n" if self.demo_type != 'gpt' else "") +
                     f"---\n\n"
                 )
 
