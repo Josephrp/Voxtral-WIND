@@ -11,3 +11,4 @@ huggingface_hub
 soundfile
 librosa
 mistral-common
+torchcodec
