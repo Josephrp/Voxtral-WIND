@@ -2,7 +2,7 @@
 title: Voxtral ASR Demo
 emoji: 🎙️
 colorFrom: indigo
-colorTo: cyan
+colorTo: purple
 sdk: gradio
 sdk_version: 5.42.0
 app_file: app.py

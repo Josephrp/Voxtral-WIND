@@ -4,4 +4,4 @@ transformers
 datasets
 soundfile
 librosa
-
+mistral-common

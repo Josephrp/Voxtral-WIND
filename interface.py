@@ -47,6 +47,43 @@ def get_username_from_token(token: str) -> Optional[str]:
     return None
 
 
+def resolve_repo_name(repo_name: str, token: Optional[str] = None, fallback_username: Optional[str] = None) -> str:
+    """
+    Resolve a repository name to full format (username/repo).
+
+    Args:
+        repo_name: Repository name, either short (repo) or full (username/repo)
+        token: HF token to get username from (optional)
+        fallback_username: Fallback username if token fails (optional)
+
+    Returns:
+        Full repository name in format username/repo
+
+    Raises:
+        ValueError: If username cannot be determined and repo_name is not already full
+    """
+    # If already in full format, return as-is
+    if "/" in repo_name:
+        return repo_name
+
+    # Try to get username from token
+    username = None
+    if token:
+        username = get_username_from_token(token)
+
+    # Fallback to environment variable
+    if not username:
+        username = os.getenv("HF_USERNAME") or fallback_username
+
+    if not username:
+        raise ValueError(
+            f"Cannot resolve full repository name for '{repo_name}'. "
+            "Please provide a full repository name (username/repo) or set HF_TOKEN/HF_USERNAME."
+        )
+
+    return f"{username}/{repo_name}"
+
+
 def run_command_stream(args: list[str], env: Dict[str, str], cwd: Optional[Path] = None) -> Generator[str, None, int]:
     import subprocess
     import shlex
@@ -189,15 +226,13 @@ def _push_dataset_to_hub(jsonl_path: str, repo_name: str, username: str = "") ->
         if not token:
             return "❌ No HF_TOKEN found. Set HF_TOKEN environment variable to push datasets."
 
-        api = HfApi(token=token)
+        # Resolve the full repository name consistently
+        try:
+            repo_name = resolve_repo_name(repo_name, token, username)
+        except ValueError as e:
+            return f"❌ {e}"
 
-        # Determine full repo name
-        if "/" not in repo_name:
-            if not username:
-                user_info = api.whoami()
-                username = user_info.get("name") or user_info.get("username") or ""
-            if username:
-                repo_name = f"{username}/{repo_name}"
+        api = HfApi(token=token)
 
         # Create dataset repository
         try:
@@ -410,7 +445,17 @@ def start_voxtral_training(
     write_token = env.get("HF_WRITE_TOKEN") or env.get("HF_TOKEN")
     read_token = env.get("HF_READ_TOKEN")
     username = get_username_from_token(write_token or "") or env.get("HF_USERNAME") or ""
-    output_dir = PROJECT_ROOT / "outputs" / repo_short
+
+    # Resolve the full repository name for consistency
+    try:
+        full_repo_name = resolve_repo_name(repo_short, write_token, username)
+    except ValueError as e:
+        return f"❌ Error: {e}"
+
+    # Use the resolved repo name to create a unique output directory
+    # Replace slashes with underscores to avoid path issues
+    output_dir_name = full_repo_name.replace("/", "_")
+    output_dir = PROJECT_ROOT / "outputs" / output_dir_name
 
     # Collect all logs
     all_logs = []
@@ -453,29 +498,28 @@ def start_voxtral_training(
 
         # 2) Push to Hub
         if push_to_hub:
-            if not username:
-                all_logs.append("❌ Cannot push to Hub: No username available. Set HF_TOKEN or HF_USERNAME.")
-            else:
-                repo_name = f"{username}/{repo_short}"
-                push_args = [
-                    str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
-                    "model",
-                    str(output_dir),
-                    repo_name,
-                ]
-                all_logs.append(f"📤 Pushing model to Hugging Face Hub: {repo_name}")
-                collect_logs(run_command_stream(push_args, env))
-                all_logs.append("✅ Model pushed successfully!")
+            push_args = [
+                str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
+                "model",
+                str(output_dir),
+                full_repo_name,
+            ]
+            all_logs.append(f"📤 Pushing model to Hugging Face Hub: {full_repo_name}")
+            collect_logs(run_command_stream(push_args, env))
+            all_logs.append("✅ Model pushed successfully!")
 
         # 3) Deploy demo Space
-        if deploy_demo and username:
+        if deploy_demo:
+            # Extract username from full repo name for demo space
+            demo_username = full_repo_name.split("/")[0]
+            demo_space_name = f"{full_repo_name.split('/')[1]}-demo"
             deploy_args = [
                 str(PROJECT_ROOT / "scripts/deploy_demo_space.py"),
                 "--hf-token", write_token or "",
-                "--hf-username", username,
-                "--model-id", f"{username}/{repo_short}",
+                "--hf-username", demo_username,
+                "--model-id", full_repo_name,
                 "--demo-type", "voxtral",
-                "--space-name", f"{repo_short}-demo",
+                "--space-name", demo_space_name,
             ]
             all_logs.append("🚀 Deploying demo Space...")
             collect_logs(run_command_stream(deploy_args, env))
