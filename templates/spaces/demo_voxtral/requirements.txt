@@ -5,3 +5,7 @@ datasets
 soundfile
 librosa
 mistral-common
+peft
+huggingface_hub
+accelerate
+safetensors

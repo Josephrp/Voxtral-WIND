@@ -1,15 +1,19 @@
-torch
-triton
+# PyTorch 2.8 ecosystem with CUDA support (required for TorchCodec 0.7)
+torch==2.8.0
 torchvision
-torchaudio
+torchaudio==2.8.0
+triton
+torchcodec==0.7
+# Core ML libraries
 datasets
 peft
 transformers
+# UI and deployment
 gradio
 gradio[mcp]
 trackio
 huggingface_hub
+# Audio processing
 soundfile
 librosa
 mistral-common
-torchcodec
