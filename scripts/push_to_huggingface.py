@@ -580,21 +580,22 @@ MIT License
         if results is None:
             results = self._load_training_results()
 
-        # Create and upload model card
+        # Create model card and persist it inside the model directory as README.md
         model_card = self.create_model_card(training_config, results)
-        model_card_path = Path("temp_model_card.md")
-        with open(model_card_path, "w", encoding="utf-8") as f:
-            f.write(model_card)
-
+        local_readme_path = self.model_path / "README.md"
         try:
-            upload_file(
-                path_or_fileobj=str(model_card_path),
-                path_in_repo="README.md",
-                repo_id=self.repo_id,
-                token=self.token
-            )
-        finally:
-            model_card_path.unlink()
+            with open(local_readme_path, "w", encoding="utf-8") as f:
+                f.write(model_card)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not write README.md to model directory: {e}")
+
+        # Upload README.md from the model directory
+        upload_file(
+            path_or_fileobj=str(local_readme_path) if local_readme_path.exists() else model_card,
+            path_in_repo="README.md",
+            repo_id=self.repo_id,
+            token=self.token
+        )
 
         # Upload model files
         if not self.upload_model_files():
