@@ -510,6 +510,24 @@ def start_voxtral_training(
         all_logs.append("✅ Training completed!")
 
         # 2) Push to Hub
+        # Push dataset first if dataset repo name is provided
+        if dataset_repo_name_value and dataset_repo_name_value.strip():
+            all_logs.append(f"📤 Pushing dataset to Hugging Face Hub: {dataset_repo_name_value}")
+            dataset_push_cmd = [
+                str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
+                "dataset",
+                str(PROJECT_ROOT / "datasets" / "voxtral_user" / "data.jsonl"),
+                dataset_repo_name_value,
+            ]
+            try:
+                result = subprocess.run(dataset_push_cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT))
+                if result.returncode == 0:
+                    all_logs.append("✅ Dataset pushed successfully!")
+                else:
+                    all_logs.append(f"❌ Dataset push failed: {result.stderr}")
+            except Exception as e:
+                all_logs.append(f"❌ Dataset push error: {e}")
+
         if push_to_hub:
             push_args = [
                 str(PROJECT_ROOT / "scripts/push_to_huggingface.py"),
