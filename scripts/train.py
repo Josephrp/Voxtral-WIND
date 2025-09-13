@@ -376,10 +376,10 @@ def main():
 
     data_collator = VoxtralDataCollator(processor, model_checkpoint)
 
-    # Only report to wandb if it's enabled and working
+    # Only report to trackio if it's enabled and working
     report_to = []
     if wandb_enabled:
-        report_to = ["wandb"]
+        report_to = ["trackio"]
     
     training_args = TrainingArguments(
         output_dir=output_dir,
