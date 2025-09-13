@@ -38,7 +38,7 @@ from transformers import (
 )
 from peft import LoraConfig, get_peft_model
 from huggingface_hub import HfApi
-import trackio
+import trackio as wandb
 
 
 def validate_hf_token(token: str) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -286,12 +286,17 @@ def main():
     if not trackio_space:
         trackio_space = get_default_space_name("voxtral-lora-finetuning")
 
-    # Initialize trackio for experiment tracking with retry logic
-    trackio_enabled = False
+    # Initialize wandb (trackio) for experiment tracking
+    wandb_enabled = False
     if trackio_space:
-        print(f"Initializing trackio with space: {trackio_space}")
+        print(f"Initializing wandb (trackio) with space: {trackio_space}")
         try:
-            trackio.init(
+            # Set a shorter timeout for trackio initialization
+            import os
+            original_timeout = os.environ.get('TRACKIO_TIMEOUT', '30')
+            os.environ['TRACKIO_TIMEOUT'] = '30'  # 30 second timeout
+            
+            wandb.init(
                 project="voxtral-lora-finetuning",
                 config={
                     "model_checkpoint": model_checkpoint,
@@ -311,16 +316,13 @@ def main():
                 },
                 space_id=trackio_space
             )
-            trackio_enabled = True
-            print("✅ Trackio initialized successfully")
+            wandb_enabled = True
+            print("✅ Wandb (trackio) initialized successfully")
         except Exception as e:
-            print(f"❌ Failed to initialize trackio with space: {e}")
-            print("⏳ Waiting 3 minutes for space to deploy before retrying...")
-            time.sleep(180)  # Wait 3 minutes (180 seconds)
-
-            print("🔄 Retrying trackio initialization with space...")
+            print(f"❌ Failed to initialize wandb (trackio) with space: {e}")
+            print("🔄 Falling back to local-only mode...")
             try:
-                trackio.init(
+                wandb.init(
                     project="voxtral-lora-finetuning",
                     config={
                         "model_checkpoint": model_checkpoint,
@@ -337,43 +339,17 @@ def main():
                         "lora_alpha": args.lora_alpha,
                         "lora_dropout": args.lora_dropout,
                         "freeze_audio_tower": args.freeze_audio_tower,
-                    },
-                    space_id=trackio_space
+                    }
                 )
-                trackio_enabled = True
-                print("✅ Trackio initialized successfully after retry")
-            except Exception as retry_e:
-                print(f"❌ Retry also failed: {retry_e}")
-                print("🔄 Falling back to local-only mode...")
-                try:
-                    trackio.init(
-                        project="voxtral-lora-finetuning",
-                        config={
-                            "model_checkpoint": model_checkpoint,
-                            "output_dir": output_dir,
-                            "batch_size": args.batch_size,
-                            "learning_rate": args.learning_rate,
-                            "epochs": args.epochs,
-                            "train_count": args.train_count,
-                            "eval_count": args.eval_count,
-                            "dataset_jsonl": args.dataset_jsonl,
-                            "dataset_name": args.dataset_name,
-                            "dataset_config": args.dataset_config,
-                            "lora_r": args.lora_r,
-                            "lora_alpha": args.lora_alpha,
-                            "lora_dropout": args.lora_dropout,
-                            "freeze_audio_tower": args.freeze_audio_tower,
-                        }
-                    )
-                    trackio_enabled = True
-                    print("✅ Trackio initialized in local-only mode")
-                except Exception as fallback_e:
-                    print(f"❌ Failed to initialize trackio in local mode: {fallback_e}")
-                    print("⚠️ Training will continue without experiment tracking")
+                wandb_enabled = True
+                print("✅ Wandb (trackio) initialized in local-only mode")
+            except Exception as fallback_e:
+                print(f"❌ Failed to initialize wandb (trackio) in local mode: {fallback_e}")
+                print("⚠️ Training will continue without experiment tracking")
     else:
-        print("Initializing trackio in local-only mode")
+        print("Initializing wandb (trackio) in local-only mode")
         try:
-            trackio.init(
+            wandb.init(
                 project="voxtral-lora-finetuning",
                 config={
                     "model_checkpoint": model_checkpoint,
@@ -392,10 +368,10 @@ def main():
                     "freeze_audio_tower": args.freeze_audio_tower,
                 }
             )
-            trackio_enabled = True
-            print("✅ Trackio initialized in local-only mode")
+            wandb_enabled = True
+            print("✅ Wandb (trackio) initialized in local-only mode")
         except Exception as e:
-            print(f"❌ Failed to initialize trackio: {e}")
+            print(f"❌ Failed to initialize wandb (trackio): {e}")
             print("⚠️ Training will continue without experiment tracking")
 
     print("Loading processor and model...")
@@ -429,6 +405,11 @@ def main():
 
     data_collator = VoxtralDataCollator(processor, model_checkpoint)
 
+    # Only report to wandb if it's enabled and working
+    report_to = []
+    if wandb_enabled:
+        report_to = ["wandb"]
+    
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=args.batch_size,
@@ -442,7 +423,7 @@ def main():
         save_steps=args.save_steps,
         eval_strategy="steps" if eval_dataset else "no",
         save_strategy="steps",
-        report_to=["trackio"],
+        report_to=report_to,
         remove_unused_columns=False,
         dataloader_num_workers=1,
     )
@@ -465,9 +446,9 @@ def main():
     if eval_dataset:
         results = trainer.evaluate()
         print(f"Final evaluation results: {results}")
-        # Log final evaluation results if trackio is enabled
-        if trackio_enabled:
-            trackio.log(results)
+        # Log final evaluation results if wandb is enabled
+        if wandb_enabled:
+            wandb.log(results)
 
     # Push dataset to Hub if requested
     if args.push_dataset and args.dataset_jsonl:
@@ -502,9 +483,9 @@ def main():
         except Exception as e:
             print(f"❌ Error pushing dataset: {e}")
 
-    # Finish trackio logging if enabled
-    if trackio_enabled:
-        trackio.finish()
+    # Finish wandb logging if enabled
+    if wandb_enabled:
+        wandb.finish()
 
     print("Training completed successfully!")
 
