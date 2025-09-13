@@ -483,13 +483,13 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
             # Try multiple CLI variants depending on installed version
             cli_attempts = [
                 ["huggingface-cli", "repo", "create", self.space_id, "--repo-type", "space", "--space_sdk", "gradio"],
-                ["hf", "repo", "create", self.space_id, "--repo-type", "space", "--space-sdk", "gradio"],
-                ["huggingface-cli", "repo", "create", self.space_id, "--repo-type", "space"],
-                ["hf", "repo", "create", self.space_id, "--repo-type", "space"],
+                ["hf", "repo", "create", self.space_id, "--repo-type", "space", "--space_sdk", "gradio"],
+                ["huggingface-cli", "repo", "create", self.space_id, "--repo-type", "space", "--space_sdk", "gradio", "--exist-ok"],
+                ["hf", "repo", "create", self.space_id, "--repo-type", "space", "--space_sdk", "gradio", "--exist-ok"],
             ]
 
             last_err = None
-            for cmd in cli_attempts:
+            for attempt, cmd in enumerate(cli_attempts):
                 logger.info(f"Running command: {' '.join(cmd)}")
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
@@ -497,10 +497,15 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
                     break
                 else:
                     last_err = result.stderr
+                    if "429" in str(result.stderr) or "Too Many Requests" in str(result.stderr):
+                        logger.warning(f"Rate limited on attempt {attempt + 1}. Waiting 30 seconds before next attempt...")
+                        time.sleep(30)
+                        continue
                     logger.warning(f"CLI attempt failed: {last_err}")
             else:
                 logger.error(f"❌ Failed to create space via CLI: {last_err}")
-                return False
+                logger.info("🔄 Attempting manual space creation fallback...")
+                return self._manual_space_creation_fallback()
 
             # Verify the space exists and is recognized as a space
             try:
@@ -520,6 +525,57 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
                 
         except Exception as e:
             logger.error(f"❌ Error creating space with CLI: {e}")
+            return self._manual_space_creation_fallback()
+    
+    def _manual_space_creation_fallback(self) -> bool:
+        """Manual fallback when all automated methods fail due to rate limiting"""
+        try:
+            logger.info("📝 Manual Space Creation Instructions:")
+            logger.info(f"   Space ID: {self.space_id}")
+            logger.info(f"   Space URL: {self.space_url}")
+            logger.info(f"   Model ID: {self.model_id}")
+            logger.info(f"   Demo Type: {self.demo_type}")
+            
+            logger.info("\n🔧 To create the space manually:")
+            logger.info("1. Go to https://huggingface.co/new-space")
+            logger.info(f"2. Set Space name to: {self.space_name}")
+            logger.info("3. Select 'Gradio' as the SDK")
+            logger.info("4. Set to Public")
+            logger.info("5. Click 'Create Space'")
+            logger.info("\n📋 After creating the space, run this command to upload files:")
+            logger.info(f"   python scripts/deploy_demo_space.py --hf-token <token> --hf-username {self.hf_username} --model-id {self.model_id} --demo-type {self.demo_type} --space-name {self.space_name} --skip-creation")
+            
+            # Check if space exists (user might have created it manually)
+            try:
+                if HF_HUB_AVAILABLE:
+                    info = self.api.repo_info(self.space_id, repo_type="space")
+                    if info:
+                        logger.info("✅ Space found! Proceeding with file upload...")
+                        return True
+            except Exception:
+                pass
+                
+            logger.info("\n⏳ Waiting for manual space creation...")
+            logger.info("   (The script will continue once the space is created)")
+            
+            # Wait for user to create space manually
+            for i in range(30):  # Wait up to 5 minutes
+                try:
+                    if HF_HUB_AVAILABLE:
+                        info = self.api.repo_info(self.space_id, repo_type="space")
+                        if info:
+                            logger.info("✅ Space created manually! Proceeding...")
+                            return True
+                except Exception:
+                    pass
+                logger.info(f"   Waiting... ({i+1}/30)")
+                time.sleep(10)
+            
+            logger.error("❌ Space not created within timeout period")
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error in manual fallback: {e}")
             return False
     
     def prepare_space_files(self) -> str:
@@ -827,7 +883,7 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
             logger.error(f"❌ Error testing space: {e}")
             return False
     
-    def deploy(self) -> bool:
+    def deploy(self, skip_creation: bool = False) -> bool:
         """Main deployment method"""
         logger.info(f"🚀 Starting demo space deployment for {self.model_id}")
         
@@ -835,9 +891,23 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
         if not self.validate_model_exists():
             return False
         
-        # Step 2: Create space repository
-        if not self.create_space_repository():
-            return False
+        # Step 2: Create space repository (skip if requested)
+        if not skip_creation:
+            if not self.create_space_repository():
+                return False
+        else:
+            logger.info("⏭️ Skipping space creation (--skip-creation flag)")
+            # Verify space exists
+            try:
+                if HF_HUB_AVAILABLE:
+                    info = self.api.repo_info(self.space_id, repo_type="space")
+                    if not info:
+                        logger.error(f"❌ Space {self.space_id} not found. Please create it first.")
+                        return False
+                    logger.info(f"✅ Found existing space: {self.space_url}")
+            except Exception as e:
+                logger.error(f"❌ Error verifying space: {e}")
+                return False
         
         # Step 3: Prepare files
         temp_dir = self.prepare_space_files()
@@ -904,6 +974,7 @@ def main():
     parser.add_argument("--brand-gh-url", help="Custom GitHub link URL (defaults to https://github.com/<org>)")
     parser.add_argument("--brand-project-name", help="Project name to link in Join Us")
     parser.add_argument("--brand-project-url", help="Project URL to link in Join Us")
+    parser.add_argument("--skip-creation", action="store_true", help="Skip space creation and only upload files (for manual space creation)")
     
     args = parser.parse_args()
     
@@ -932,7 +1003,7 @@ def main():
         brand_project_url=args.brand_project_url,
     )
     
-    success = deployer.deploy()
+    success = deployer.deploy(skip_creation=getattr(args, 'skip_creation', False))
     
     if success:
         print("\n✅ Deployment successful!")
