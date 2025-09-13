@@ -515,6 +515,16 @@ def start_voxtral_training(
                 "model",
                 str(output_dir),
                 full_repo_name,
+                "--author-name", "Voxtral Trainer",
+                "--model-description", "Fine-tuned Voxtral ASR model",
+                "--model-name", base_model,
+                "--trainer-type", ("SFTTrainer"),
+                "--training-config-type", ("Custom Configuration"),
+                "--batch-size", str(int(batch_size) if isinstance(batch_size, (int, float)) else batch_size),
+                "--gradient-accumulation-steps", str(int(grad_accum) if isinstance(grad_accum, (int, float)) else grad_accum),
+                "--learning-rate", str(learning_rate),
+                "--max-epochs", str(epochs),
+                "--trackio-url", env.get("TRACKIO_URL", "N/A"),
             ]
             all_logs.append(f"📤 Pushing model to Hugging Face Hub: {full_repo_name}")
             push_code = collect_logs_with_code(run_command_stream(push_args, env))

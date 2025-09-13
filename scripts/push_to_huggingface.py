@@ -47,7 +47,18 @@ class HuggingFacePusher:
         author_name: Optional[str] = None,
         model_description: Optional[str] = None,
         model_name: Optional[str] = None,
-        dataset_name: Optional[str] = None
+        dataset_name: Optional[str] = None,
+        # Optional metadata for model card generation
+        experiment_name: Optional[str] = None,
+        dataset_repo: Optional[str] = None,
+        training_config_type: Optional[str] = None,
+        trainer_type: Optional[str] = None,
+        batch_size: Optional[str] = None,
+        gradient_accumulation_steps: Optional[str] = None,
+        learning_rate: Optional[str] = None,
+        max_epochs: Optional[str] = None,
+        max_seq_length: Optional[str] = None,
+        trackio_url: Optional[str] = None,
     ):
         self.model_path = Path(model_path)
         # Original user input (may be just the repo name without username)
@@ -60,6 +71,17 @@ class HuggingFacePusher:
         # Model card generation details
         self.model_name = model_name
         self.dataset_name = dataset_name
+        # Optional metadata (ensure attributes always exist to avoid AttributeError)
+        self.experiment_name = experiment_name
+        self.dataset_repo = dataset_repo
+        self.training_config_type = training_config_type
+        self.trainer_type = trainer_type
+        self.batch_size = batch_size
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.learning_rate = learning_rate
+        self.max_epochs = max_epochs
+        self.max_seq_length = max_seq_length
+        self.trackio_url = trackio_url
         
         # Initialize HF API
         if HF_AVAILABLE:
@@ -278,7 +300,7 @@ class HuggingFacePusher:
                 "repo_name": self.repo_id,
                 "model_name": self.repo_id.split('/')[-1],
                 "experiment_name": self.experiment_name or "model_push",
-                "dataset_repo": self.dataset_repo,
+                "dataset_repo": self.dataset_repo or "",
                 "author_name": self.author_name or "Model Author",
                 "model_description": self.model_description or "A fine-tuned version of SmolLM3-3B for improved text generation capabilities.",
                 "training_config_type": self.training_config_type or "Custom Configuration",
@@ -286,6 +308,7 @@ class HuggingFacePusher:
                 "dataset_name": self.dataset_name or "Custom Dataset",
                 "trainer_type": self.trainer_type or "SFTTrainer",
                 "batch_size": str(self.batch_size) if self.batch_size else "8",
+                "gradient_accumulation_steps": str(self.gradient_accumulation_steps) if self.gradient_accumulation_steps else variables.get("gradient_accumulation_steps", "16"),
                 "learning_rate": str(self.learning_rate) if self.learning_rate else "5e-6",
                 "max_epochs": str(self.max_epochs) if self.max_epochs else "3",
                 "max_seq_length": str(self.max_seq_length) if self.max_seq_length else "2048",
@@ -895,6 +918,17 @@ def parse_args():
     model_parser.add_argument('--model-description', type=str, default=None, help='Model description for model card')
     model_parser.add_argument('--model-name', type=str, default=None, help='Base model name')
     model_parser.add_argument('--dataset-name', type=str, default=None, help='Dataset name')
+    # Optional model card metadata
+    model_parser.add_argument('--experiment-name', type=str, default=None, help='Experiment name for model card')
+    model_parser.add_argument('--dataset-repo', type=str, default=None, help='Dataset repo for model card')
+    model_parser.add_argument('--training-config-type', type=str, default=None, help='Training config type for model card')
+    model_parser.add_argument('--trainer-type', type=str, default=None, help='Trainer type for model card')
+    model_parser.add_argument('--batch-size', type=str, default=None, help='Batch size for model card')
+    model_parser.add_argument('--gradient-accumulation-steps', type=str, default=None, help='Grad accum steps for model card')
+    model_parser.add_argument('--learning-rate', type=str, default=None, help='Learning rate for model card')
+    model_parser.add_argument('--max-epochs', type=str, default=None, help='Max epochs for model card')
+    model_parser.add_argument('--max-seq-length', type=str, default=None, help='Max seq length for model card')
+    model_parser.add_argument('--trackio-url', type=str, default=None, help='Trackio URL for model card')
 
     # Dataset push subcommand
     dataset_parser = subparsers.add_parser('dataset', help='Push dataset to Hugging Face Hub')
@@ -933,7 +967,17 @@ def main():
                 author_name=args.author_name,
                 model_description=args.model_description,
                 model_name=args.model_name,
-                dataset_name=args.dataset_name
+                dataset_name=args.dataset_name,
+                experiment_name=args.experiment_name,
+                dataset_repo=args.dataset_repo,
+                training_config_type=args.training_config_type,
+                trainer_type=args.trainer_type,
+                batch_size=args.batch_size,
+                gradient_accumulation_steps=args.gradient_accumulation_steps,
+                learning_rate=args.learning_rate,
+                max_epochs=args.max_epochs,
+                max_seq_length=args.max_seq_length,
+                trackio_url=args.trackio_url,
             )
 
             # Push model
