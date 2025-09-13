@@ -5,6 +5,8 @@ tags:
 - asr
 - speech-to-text
 - fine-tuning
+- tonic
+
 pipeline_tag: automatic-speech-recognition
 base_model: {{base_model}}
 {{#if has_hub_dataset_id}}
@@ -38,6 +40,15 @@ max_seq_length: {{max_seq_length}}
 {{#if hardware_info}}
 hardware: "{{hardware_info}}"
 {{/if}}
+language:
+- hi
+- en
+- fr
+- de
+- it
+- pt
+- nl
+library_name: peft
 ---
 
 # {{model_name}}

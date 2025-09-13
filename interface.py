@@ -439,6 +439,7 @@ def start_voxtral_training(
     freeze_audio_tower: bool,
     push_to_hub: bool,
     deploy_demo: bool,
+    dataset_repo_name_value: str = "",
 ) -> str:
     """Start Voxtral training and return collected logs as a string."""
     env = os.environ.copy()
@@ -526,6 +527,13 @@ def start_voxtral_training(
                 "--max-epochs", str(epochs),
                 "--trackio-url", env.get("TRACKIO_URL", "N/A"),
             ]
+            # If user provided a Hub dataset repo id, include it for the model card
+            try:
+                ds_name = (dataset_repo_name_value or "").strip()
+                if ds_name and "/" in ds_name and " " not in ds_name and len(ds_name.split("/")) == 2:
+                    push_args += ["--dataset-name", ds_name]
+            except Exception:
+                pass
             all_logs.append(f"📤 Pushing model to Hugging Face Hub: {full_repo_name}")
             push_code = collect_logs_with_code(run_command_stream(push_args, env))
             if push_code != 0:
