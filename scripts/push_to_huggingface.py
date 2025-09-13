@@ -294,7 +294,11 @@ class HuggingFacePusher:
             
             # Create variables for the model card
             variables = create_default_variables()
-            
+
+            # Determine whether dataset_name looks like a valid Hub dataset id (owner/dataset)
+            hub_dataset = (self.dataset_name or "").strip()
+            has_hub_dataset_id = bool(hub_dataset and "/" in hub_dataset and " " not in hub_dataset and len(hub_dataset.split("/")) == 2)
+
             # Update with actual values
             variables.update({
                 "repo_name": self.repo_id,
@@ -305,7 +309,10 @@ class HuggingFacePusher:
                 "model_description": self.model_description or "A fine-tuned version of SmolLM3-3B for improved text generation capabilities.",
                 "training_config_type": self.training_config_type or "Custom Configuration",
                 "base_model": self.model_name or "HuggingFaceTB/SmolLM3-3B",
-                "dataset_name": self.dataset_name or "Custom Dataset",
+                "dataset_name": hub_dataset if hub_dataset else "",
+                "has_hub_dataset_id": has_hub_dataset_id,
+                # Only include model-index when a dataset is provided or when metrics are meaningful
+                "include_model_index": bool(hub_dataset),
                 "trainer_type": self.trainer_type or "SFTTrainer",
                 "batch_size": str(self.batch_size) if self.batch_size else "8",
                 "gradient_accumulation_steps": str(self.gradient_accumulation_steps) if self.gradient_accumulation_steps else variables.get("gradient_accumulation_steps", "16"),
@@ -576,7 +583,7 @@ MIT License
         # Create and upload model card
         model_card = self.create_model_card(training_config, results)
         model_card_path = Path("temp_model_card.md")
-        with open(model_card_path, "w") as f:
+        with open(model_card_path, "w", encoding="utf-8") as f:
             f.write(model_card)
 
         try:
@@ -779,7 +786,7 @@ This dataset is created for research and educational purposes.
 
             # Upload README
             readme_path = dataset_file.parent / "README.md"
-            with open(readme_path, "w") as f:
+            with open(readme_path, "w", encoding="utf-8") as f:
                 f.write(readme_content)
 
             upload_file(
