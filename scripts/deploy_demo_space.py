@@ -480,31 +480,42 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
             # Set HF token for CLI
             os.environ['HF_TOKEN'] = self.hf_token
             
-            # Create space using Hugging Face CLI
-            cmd = [
-                "hf", "repo", "create",
-                self.space_id,
-                "--type", "space"
+            # Try multiple CLI variants depending on installed version
+            cli_attempts = [
+                ["hf", "space", "create", self.space_id, "--type", "gradio", "--hardware", "cpu-basic"],
+                ["huggingface-cli", "space", "create", self.space_id, "--type", "gradio", "--hardware", "cpu-basic"],
+                ["hf", "repo", "create", self.space_id, "--repo-type", "space"],
+                ["huggingface-cli", "repo", "create", self.space_id, "--repo-type", "space"],
             ]
-            
-            logger.info(f"Running command: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                logger.warning(f"First attempt failed: {result.stderr}")
-                # Try alternative approach without space-specific flags
-                logger.info("Retrying with basic space creation...")
-                cmd = [
-                    "hf", "repo", "create",
-                    self.space_id
-                ]
+
+            last_err = None
+            for cmd in cli_attempts:
+                logger.info(f"Running command: {' '.join(cmd)}")
                 result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                logger.info(f"✅ Space created successfully: {self.space_url}")
-                return True
+                if result.returncode == 0:
+                    logger.info(f"✅ Space created (CLI): {self.space_url}")
+                    break
+                else:
+                    last_err = result.stderr
+                    logger.warning(f"CLI attempt failed: {last_err}")
             else:
-                logger.error(f"❌ Failed to create space: {result.stderr}")
+                logger.error(f"❌ Failed to create space via CLI: {last_err}")
+                return False
+
+            # Verify the space exists and is recognized as a space
+            try:
+                for _ in range(10):
+                    try:
+                        info = self.api.repo_info(self.space_id, repo_type="space")
+                        if info:  # type: ignore
+                            logger.info("✅ Verified space existence via API")
+                            return True
+                    except Exception:
+                        time.sleep(2)
+                logger.error("❌ Space verification timed out after CLI creation")
+                return False
+            except Exception as e:
+                logger.error(f"❌ Error verifying space: {e}")
                 return False
                 
         except Exception as e:
@@ -626,20 +637,26 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
             
             for file_path in temp_path.iterdir():
                 if file_path.is_file():
-                    try:
-                        # Upload file to the space
-                        upload_file(
-                            path_or_fileobj=str(file_path),
-                            path_in_repo=file_path.name,
-                            repo_id=self.space_id,
-                            repo_type="space",
-                            token=self.hf_token
-                        )
-                        uploaded_files.append(file_path.name)
-                        logger.info(f"✅ Uploaded {file_path.name}")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to upload {file_path.name}: {e}")
-                        return False
+                    # Retry uploads to absorb propagation delays
+                    for attempt in range(5):
+                        try:
+                            upload_file(
+                                path_or_fileobj=str(file_path),
+                                path_in_repo=file_path.name,
+                                repo_id=self.space_id,
+                                repo_type="space",
+                                token=self.hf_token
+                            )
+                            uploaded_files.append(file_path.name)
+                            logger.info(f"✅ Uploaded {file_path.name}")
+                            break
+                        except Exception as e:
+                            if "404" in str(e) or "Not Found" in str(e):
+                                logger.warning(f"Upload failed (likely propagation). Retry {attempt+1}/5 in 2s: {e}")
+                                time.sleep(2)
+                                continue
+                            logger.error(f"❌ Failed to upload {file_path.name}: {e}")
+                            return False
             
             logger.info(f"✅ Successfully uploaded {len(uploaded_files)} files to Space")
             return True
