@@ -484,8 +484,8 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url
             cli_attempts = [
                 ["hf", "space", "create", self.space_id, "--type", "gradio", "--hardware", "cpu-basic"],
                 ["huggingface-cli", "space", "create", self.space_id, "--type", "gradio", "--hardware", "cpu-basic"],
-                ["hf", "repo", "create", self.space_id, "--repo-type", "space"],
-                ["huggingface-cli", "repo", "create", self.space_id, "--repo-type", "space"],
+                ["hf", "repo", "create", self.space_id, "--repo-type", "space", "--space-sdk", "gradio"],
+                ["huggingface-cli", "repo", "create", self.space_id, "--repo-type", "space", "--space-sdk", "gradio"],
             ]
 
             last_err = None
