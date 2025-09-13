@@ -405,11 +405,9 @@ def main():
 
     data_collator = VoxtralDataCollator(processor, model_checkpoint)
 
-    # Only report to trackio if it's enabled and working
+    # Disable Transformers Trackio callback to avoid httpx timeouts; logging is handled via trackio.init()
     report_to = []
-    if wandb_enabled:
-        report_to = ["trackio"]
-    
+
     training_args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=args.batch_size,

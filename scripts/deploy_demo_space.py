@@ -189,36 +189,37 @@ class DemoSpaceDeployer:
             # For GPT-OSS models, we need more sophisticated environment setup
             model_name = self.model_id.split("/")[-1] if "/" in self.model_id else self.model_id
             import json as _json
-            env_setup = f"""
-# Environment variables for GPT-OSS model configuration
+            ex_type_line = f"os.environ['EXAMPLES_TYPE'] = {_json.dumps(self.examples_type)}\n" if self.examples_type else ""
+            disable_line = ("os.environ['DISABLE_EXAMPLES'] = 'true'\n" if self.disable_examples
+                            else ("os.environ['DISABLE_EXAMPLES'] = 'false'\n" if self.disable_examples is not None else ""))
+            examples_json_line = f"os.environ['EXAMPLES_JSON'] = {_json.dumps(self.examples_json)}\n" if self.examples_json else ""
+            env_setup = f"""# Environment variables for GPT-OSS model configuration
 import os
-os.environ['HF_MODEL_ID'] = json.dumps(self.model_id)
-os.environ['LORA_MODEL_ID'] = json.dumps(self.model_id)
+import json
+os.environ['HF_MODEL_ID'] = json.dumps({_json.dumps(self.model_id)})
+os.environ['LORA_MODEL_ID'] = json.dumps({_json.dumps(self.model_id)})
 os.environ['BASE_MODEL_ID'] = 'openai/gpt-oss-20b'
-os.environ['MODEL_SUBFOLDER'] = json.dumps(self.subfolder if self.subfolder else "")
-os.environ['MODEL_NAME'] = json.dumps(model_name)
-os.environ['MODEL_IDENTITY'] = json.dumps(self.model_identity or "")
-os.environ['SYSTEM_MESSAGE'] = json.dumps(self.system_message or (self.model_identity or ""))
-os.environ['DEVELOPER_MESSAGE'] = json.dumps(self.developer_message or "")
-os.environ['REASONING_EFFORT'] = json.dumps((self.reasoning_effort or "medium"))
-{"os.environ['EXAMPLES_TYPE'] = " + _json.dumps(self.examples_type) + "\n" if self.examples_type else ''}
-{"os.environ['DISABLE_EXAMPLES'] = 'true'\n" if self.disable_examples else ("os.environ['DISABLE_EXAMPLES'] = 'false'\n" if self.disable_examples is not None else '')}
-{"os.environ['EXAMPLES_JSON'] = " + _json.dumps(self.examples_json) + "\n" if self.examples_json else ''}
+os.environ['MODEL_SUBFOLDER'] = json.dumps({_json.dumps(self.subfolder if self.subfolder else "")})
+os.environ['MODEL_NAME'] = json.dumps({_json.dumps(model_name)})
+os.environ['MODEL_IDENTITY'] = json.dumps({_json.dumps(self.model_identity or "")})
+os.environ['SYSTEM_MESSAGE'] = json.dumps({_json.dumps(self.system_message or (self.model_identity or ""))})
+os.environ['DEVELOPER_MESSAGE'] = json.dumps({_json.dumps(self.developer_message or "")})
+os.environ['REASONING_EFFORT'] = json.dumps({_json.dumps((self.reasoning_effort or "medium"))})
+{ex_type_line}{disable_line}{examples_json_line}
 
 # Branding/owner variables
-os.environ['HF_USERNAME'] = json.dumps(self.hf_username)
-os.environ['BRAND_OWNER_NAME'] = json.dumps(self.brand_owner_name)
-os.environ['BRAND_TEAM_NAME'] = json.dumps(self.brand_team_name)
-os.environ['BRAND_DISCORD_URL'] = json.dumps(self.brand_discord_url)
-os.environ['BRAND_HF_ORG'] = json.dumps(self.brand_hf_org)
-os.environ['BRAND_HF_LABEL'] = json.dumps(self.brand_hf_label)
-os.environ['BRAND_HF_URL'] = json.dumps(self.brand_hf_url)
-os.environ['BRAND_GH_ORG'] = json.dumps(self.brand_gh_org)
-os.environ['BRAND_GH_LABEL'] = json.dumps(self.brand_gh_label)
-os.environ['BRAND_GH_URL'] = json.dumps(self.brand_gh_url)
-os.environ['BRAND_PROJECT_NAME'] = json.dumps(self.brand_project_name)
-os.environ['BRAND_PROJECT_URL'] = json.dumps(self.brand_project_url)
-
+os.environ['HF_USERNAME'] = json.dumps({_json.dumps(self.hf_username)})
+os.environ['BRAND_OWNER_NAME'] = json.dumps({_json.dumps(self.brand_owner_name)})
+os.environ['BRAND_TEAM_NAME'] = json.dumps({_json.dumps(self.brand_team_name)})
+os.environ['BRAND_DISCORD_URL'] = json.dumps({_json.dumps(self.brand_discord_url)})
+os.environ['BRAND_HF_ORG'] = json.dumps({_json.dumps(self.brand_hf_org)})
+os.environ['BRAND_HF_LABEL'] = json.dumps({_json.dumps(self.brand_hf_label)})
+os.environ['BRAND_HF_URL'] = json.dumps({_json.dumps(self.brand_hf_url)})
+os.environ['BRAND_GH_ORG'] = json.dumps({_json.dumps(self.brand_gh_org)})
+os.environ['BRAND_GH_LABEL'] = json.dumps({_json.dumps(self.brand_gh_label)})
+os.environ['BRAND_GH_URL'] = json.dumps({_json.dumps(self.brand_gh_url)})
+os.environ['BRAND_PROJECT_NAME'] = json.dumps({_json.dumps(self.brand_project_name)})
+os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url)})
 """
         elif self.demo_type == "voxtral":
             # For Voxtral, we do not inject env setup into app.py.
@@ -227,34 +228,35 @@ os.environ['BRAND_PROJECT_URL'] = json.dumps(self.brand_project_url)
         else:
             # For SmolLM models, use simpler setup
             import json as _json
-            env_setup = f"""
-# Environment variables for model configuration
+            ex_type_line = f"os.environ['EXAMPLES_TYPE'] = {_json.dumps(self.examples_type)}\n" if self.examples_type else ""
+            disable_line = ("os.environ['DISABLE_EXAMPLES'] = 'true'\n" if self.disable_examples
+                            else ("os.environ['DISABLE_EXAMPLES'] = 'false'\n" if self.disable_examples is not None else ""))
+            examples_json_line = f"os.environ['EXAMPLES_JSON'] = {_json.dumps(self.examples_json)}\n" if self.examples_json else ""
+            env_setup = f"""# Environment variables for model configuration
 import os
-os.environ['HF_MODEL_ID'] = json.dumps(self.model_id)
-os.environ['MODEL_SUBFOLDER'] = json.dumps(self.subfolder if self.subfolder else "")
-os.environ['MODEL_NAME'] = json.dumps(self.model_id.split("/")[-1])
-os.environ['MODEL_IDENTITY'] = json.dumps(self.model_identity or "")
-os.environ['SYSTEM_MESSAGE'] = json.dumps(self.system_message or (self.model_identity or ""))
-os.environ['DEVELOPER_MESSAGE'] = json.dumps(self.developer_message or "")
-os.environ['REASONING_EFFORT'] = json.dumps((self.reasoning_effort or "medium"))
-{"os.environ['EXAMPLES_TYPE'] = " + _json.dumps(self.examples_type) + "\n" if self.examples_type else ''}
-{"os.environ['DISABLE_EXAMPLES'] = 'true'\n" if self.disable_examples else ("os.environ['DISABLE_EXAMPLES'] = 'false'\n" if self.disable_examples is not None else '')}
-{"os.environ['EXAMPLES_JSON'] = " + _json.dumps(self.examples_json) + "\n" if self.examples_json else ''}
+import json
+os.environ['HF_MODEL_ID'] = json.dumps({_json.dumps(self.model_id)})
+os.environ['MODEL_SUBFOLDER'] = json.dumps({_json.dumps(self.subfolder if self.subfolder else "")})
+os.environ['MODEL_NAME'] = json.dumps({_json.dumps(self.model_id.split("/")[-1])})
+os.environ['MODEL_IDENTITY'] = json.dumps({_json.dumps(self.model_identity or "")})
+os.environ['SYSTEM_MESSAGE'] = json.dumps({_json.dumps(self.system_message or (self.model_identity or ""))})
+os.environ['DEVELOPER_MESSAGE'] = json.dumps({_json.dumps(self.developer_message or "")})
+os.environ['REASONING_EFFORT'] = json.dumps({_json.dumps((self.reasoning_effort or "medium"))})
+{ex_type_line}{disable_line}{examples_json_line}
 
 # Branding/owner variables
-os.environ['HF_USERNAME'] = json.dumps(self.hf_username)
-os.environ['BRAND_OWNER_NAME'] = json.dumps(self.brand_owner_name)
-os.environ['BRAND_TEAM_NAME'] = json.dumps(self.brand_team_name)
-os.environ['BRAND_DISCORD_URL'] = json.dumps(self.brand_discord_url)
-os.environ['BRAND_HF_ORG'] = json.dumps(self.brand_hf_org)
-os.environ['BRAND_HF_LABEL'] = json.dumps(self.brand_hf_label)
-os.environ['BRAND_HF_URL'] = json.dumps(self.brand_hf_url)
-os.environ['BRAND_GH_ORG'] = json.dumps(self.brand_gh_org)
-os.environ['BRAND_GH_LABEL'] = json.dumps(self.brand_gh_label)
-os.environ['BRAND_GH_URL'] = json.dumps(self.brand_gh_url)
-os.environ['BRAND_PROJECT_NAME'] = json.dumps(self.brand_project_name)
-os.environ['BRAND_PROJECT_URL'] = json.dumps(self.brand_project_url)
-
+os.environ['HF_USERNAME'] = json.dumps({_json.dumps(self.hf_username)})
+os.environ['BRAND_OWNER_NAME'] = json.dumps({_json.dumps(self.brand_owner_name)})
+os.environ['BRAND_TEAM_NAME'] = json.dumps({_json.dumps(self.brand_team_name)})
+os.environ['BRAND_DISCORD_URL'] = json.dumps({_json.dumps(self.brand_discord_url)})
+os.environ['BRAND_HF_ORG'] = json.dumps({_json.dumps(self.brand_hf_org)})
+os.environ['BRAND_HF_LABEL'] = json.dumps({_json.dumps(self.brand_hf_label)})
+os.environ['BRAND_HF_URL'] = json.dumps({_json.dumps(self.brand_hf_url)})
+os.environ['BRAND_GH_ORG'] = json.dumps({_json.dumps(self.brand_gh_org)})
+os.environ['BRAND_GH_LABEL'] = json.dumps({_json.dumps(self.brand_gh_label)})
+os.environ['BRAND_GH_URL'] = json.dumps({_json.dumps(self.brand_gh_url)})
+os.environ['BRAND_PROJECT_NAME'] = json.dumps({_json.dumps(self.brand_project_name)})
+os.environ['BRAND_PROJECT_URL'] = json.dumps({_json.dumps(self.brand_project_url)})
 """
         return env_setup
     

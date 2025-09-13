@@ -460,11 +460,20 @@ def start_voxtral_training(
     # Collect all logs
     all_logs = []
 
-    def collect_logs(generator):
-        """Helper to collect logs from a generator."""
+    def collect_logs_with_code(generator):
+        """Collect logs and parse the exit code from the final status line."""
+        import re
+        exit_code = None
         for line in generator:
             all_logs.append(line)
-            print(line)  # Also print to console for debugging
+            print(line)
+            m = re.search(r"exit code:\s*(\d+)", line)
+            if m:
+                try:
+                    exit_code = int(m.group(1))
+                except Exception:
+                    pass
+        return 0 if exit_code == 0 else (exit_code if exit_code is not None else 1)
 
     try:
         # 1) Train
@@ -493,7 +502,10 @@ def start_voxtral_training(
                 args += ["--freeze-audio-tower"]
 
         all_logs.append("🚀 Starting Voxtral training...")
-        collect_logs(run_command_stream(args, env))
+        train_code = collect_logs_with_code(run_command_stream(args, env))
+        if train_code != 0:
+            all_logs.append("❌ Training failed. Skipping model push and demo deployment.")
+            return "\n".join(all_logs)
         all_logs.append("✅ Training completed!")
 
         # 2) Push to Hub
@@ -505,8 +517,11 @@ def start_voxtral_training(
                 full_repo_name,
             ]
             all_logs.append(f"📤 Pushing model to Hugging Face Hub: {full_repo_name}")
-            collect_logs(run_command_stream(push_args, env))
-            all_logs.append("✅ Model pushed successfully!")
+            push_code = collect_logs_with_code(run_command_stream(push_args, env))
+            if push_code != 0:
+                all_logs.append("❌ Model push failed.")
+            else:
+                all_logs.append("✅ Model pushed successfully!")
 
         # 3) Deploy demo Space
         if deploy_demo:
@@ -522,8 +537,11 @@ def start_voxtral_training(
                 "--space-name", demo_space_name,
             ]
             all_logs.append("🚀 Deploying demo Space...")
-            collect_logs(run_command_stream(deploy_args, env))
-            all_logs.append("✅ Demo Space deployed!")
+            deploy_code = collect_logs_with_code(run_command_stream(deploy_args, env))
+            if deploy_code != 0:
+                all_logs.append("❌ Demo Space deployment failed.")
+            else:
+                all_logs.append("✅ Demo Space deployed!")
 
         # Return all collected logs as a single string
         return "\n".join(all_logs)
